@@ -1,0 +1,56 @@
+# Databricks Asset Bundle configuration for Lakebase Todo App
+#
+# Deploy with: databricks bundle deploy -t <target>
+#
+# Targets:
+#   - dev: Development environment
+#   - prod: Production environment
+
+bundle:
+  name: lakebase-todo-app
+
+# Include resource definitions from the resources directory
+include:
+  - resources/*.yml
+
+# Workspace sync configuration
+sync:
+  include:
+    - src/**
+    - frontend/dist/**
+    - sql/**
+    - app.py
+    - app.yaml
+    - pyproject.toml
+    - requirements.txt
+
+# Variables with defaults (can be overridden per target)
+variables:
+  lakebase_project_id:
+    description: Lakebase project ID
+    default: todo-app
+  lakebase_branch_id:
+    description: Lakebase branch ID
+    default: main
+  lakebase_endpoint_id:
+    description: Lakebase endpoint ID
+    default: default
+  lakebase_database:
+    description: Lakebase database name
+    default: postgres
+
+# Target environments
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      profile: fe-sandbox
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/dev
+
+  prod:
+    mode: production
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/prod
+    run_as:
+      user_name: ${workspace.current_user.userName}
