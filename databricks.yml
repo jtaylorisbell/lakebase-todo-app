@@ -37,7 +37,7 @@ variables:
     default: default
   lakebase_database:
     description: Lakebase database name
-    default: postgres
+    default: todoapp
 
 # Target environments
 targets:

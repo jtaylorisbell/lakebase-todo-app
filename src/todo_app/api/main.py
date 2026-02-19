@@ -1,5 +1,6 @@
 """FastAPI application for Todo App."""
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import structlog
@@ -23,10 +24,54 @@ from todo_app.db.postgres import get_db
 
 logger = structlog.get_logger()
 
+
+def _check_migrations() -> None:
+    """Warn on startup if the database has pending migrations."""
+    try:
+        from alembic.config import Config
+        from alembic.script import ScriptDirectory
+
+        project_root = _find_project_root()
+        alembic_cfg = Config(str(project_root / "alembic.ini"))
+        alembic_cfg.set_main_option("script_location", str(project_root / "alembic"))
+        head = ScriptDirectory.from_config(alembic_cfg).get_current_head()
+
+        db = get_db()
+        with db.session() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT version_num FROM alembic_version")
+                row = cur.fetchone()
+                current = row[0] if row else None
+
+        if current is None:
+            logger.warning(
+                "migrations_not_initialized",
+                hint="Run 'alembic upgrade head' to initialize the database",
+            )
+        elif current != head:
+            logger.warning(
+                "migrations_pending",
+                current=current,
+                head=head,
+                hint="Run 'alembic upgrade head' to apply pending migrations",
+            )
+        else:
+            logger.info("migrations_up_to_date", revision=current)
+    except Exception as e:
+        logger.warning("migration_check_failed", error=str(e))
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    _check_migrations()
+    yield
+
+
 app = FastAPI(
     title="Lakebase Todo App API",
     description="A beautiful To-Do list powered by Databricks Apps and Lakebase",
     version=__version__,
+    lifespan=lifespan,
 )
 
 app.add_middleware(

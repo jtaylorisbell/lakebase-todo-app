@@ -28,7 +28,6 @@ class OAuthTokenManager:
     def get_token(
         self,
         endpoint_name: str,
-        workspace_host: str | None = None,
         force_refresh: bool = False,
     ) -> str | None:
         if not endpoint_name:
@@ -47,7 +46,7 @@ class OAuthTokenManager:
             from databricks.sdk import WorkspaceClient
 
             logger.info("generating_oauth_token", endpoint=endpoint_name)
-            w = WorkspaceClient(host=workspace_host) if workspace_host else WorkspaceClient()
+            w = WorkspaceClient()
             cred = w.postgres.generate_database_credential(endpoint=endpoint_name)
 
             self._token = cred.token
@@ -66,17 +65,6 @@ class OAuthTokenManager:
 _token_manager = OAuthTokenManager()
 
 
-class DatabricksSettings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_prefix="DATABRICKS_",
-        env_file=".env",
-        env_file_encoding="utf-8",
-        extra="ignore",
-    )
-
-    host: str = ""
-
-
 class LakebaseSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="LAKEBASE_",
@@ -85,12 +73,9 @@ class LakebaseSettings(BaseSettings):
         extra="ignore",
     )
 
-    host: str = "localhost"
-    port: int = 5432
-    database: str = "postgres"
+    database: str = "todoapp"
     user: str = "lakebase"
     password: str = ""
-    sslmode: str = "require"
     project_id: str = "todo-app"
     branch_id: str = "main"
     endpoint_id: str = "default"
@@ -99,18 +84,21 @@ class LakebaseSettings(BaseSettings):
     def endpoint_name(self) -> str:
         return f"projects/{self.project_id}/branches/{self.branch_id}/endpoints/{self.endpoint_id}"
 
-    def get_password(self, workspace_host: str | None = None) -> str:
+    def get_host(self) -> str:
+        """Resolve the Postgres host dynamically from the Lakebase endpoint."""
+        from databricks.sdk import WorkspaceClient
+
+        w = WorkspaceClient()
+        endpoint = w.postgres.get_endpoint(name=self.endpoint_name)
+        return endpoint.status.hosts.host
+
+    def get_password(self) -> str:
+        """Get the database password, generating an OAuth token if needed."""
         if self.password:
             return self.password
 
         if self.project_id:
-            if workspace_host is None:
-                databricks = DatabricksSettings()
-                workspace_host = databricks.host or None
-            token = _token_manager.get_token(
-                endpoint_name=self.endpoint_name,
-                workspace_host=workspace_host,
-            )
+            token = _token_manager.get_token(endpoint_name=self.endpoint_name)
             if token:
                 return token
 
@@ -141,10 +129,6 @@ class Settings(BaseSettings):
     @property
     def lakebase(self) -> LakebaseSettings:
         return LakebaseSettings()
-
-    @property
-    def databricks(self) -> DatabricksSettings:
-        return DatabricksSettings()
 
     @property
     def user(self) -> UserSettings:

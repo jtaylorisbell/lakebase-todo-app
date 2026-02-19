@@ -32,7 +32,7 @@ class LakebaseConnectionFactory:
             )
 
             endpoint = self._workspace_client.postgres.get_endpoint(name=self._endpoint_name)
-            self._postgres_host = endpoint.status.host
+            self._postgres_host = endpoint.status.hosts.host
             self._postgres_database = os.getenv("LAKEBASE_DATABASE", "postgres")
             self._postgres_username = self._config.client_id
             self._use_databricks_apps = True
@@ -48,11 +48,10 @@ class LakebaseConnectionFactory:
 
             self._use_databricks_apps = False
             settings = get_settings()
-            self._postgres_host = settings.lakebase.host
+            self._postgres_host = settings.lakebase.get_host()
             self._postgres_database = settings.lakebase.database
             self._postgres_username = settings.lakebase.user
             self._endpoint_name = settings.lakebase.endpoint_name
-            self._local_settings = settings
 
             logger.info(
                 "lakebase_factory_initialized",
@@ -78,10 +77,7 @@ class LakebaseConnectionFactory:
         else:
             from todo_app.config import _token_manager
 
-            token = _token_manager.get_token(
-                endpoint_name=self._endpoint_name,
-                workspace_host=self._local_settings.databricks.host,
-            )
+            token = _token_manager.get_token(endpoint_name=self._endpoint_name)
 
             return psycopg.connect(
                 host=self._postgres_host,

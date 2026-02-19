@@ -16,7 +16,7 @@ from sqlalchemy import engine_from_config, pool
 # Ensure src/ is importable
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from todo_app.config import DatabricksSettings, LakebaseSettings  # noqa: E402
+from todo_app.config import LakebaseSettings  # noqa: E402
 from todo_app.db.schemas import Base  # noqa: E402
 
 config = context.config
@@ -26,12 +26,12 @@ target_metadata = Base.metadata
 def _build_url() -> str:
     """Build a SQLAlchemy database URL from LakebaseSettings + OAuth."""
     lb = LakebaseSettings()
-    db = DatabricksSettings()
-    password = lb.get_password(workspace_host=db.host or None)
+    host = lb.get_host()
+    password = lb.get_password()
     return (
         f"postgresql+psycopg2://{quote_plus(lb.user)}:{quote_plus(password)}"
-        f"@{lb.host}:{lb.port}/{lb.database}"
-        f"?sslmode={lb.sslmode}"
+        f"@{host}:5432/{lb.database}"
+        f"?sslmode=require"
     )
 
 

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 import structlog
 from databricks.sdk import WorkspaceClient
-from databricks.sdk.errors import AlreadyExists, NotFound
+from databricks.sdk.errors import AlreadyExists, BadRequest, NotFound
 from databricks.sdk.service.postgres import (
     Branch,
     BranchSpec,
@@ -20,6 +20,7 @@ from databricks.sdk.service.postgres import (
     RoleIdentityType,
     RoleRoleSpec,
 )
+from google.protobuf.duration_pb2 import Duration
 
 logger = structlog.get_logger()
 
@@ -91,7 +92,7 @@ class LakebaseProvisioner:
         *,
         min_cu: float = 0.5,
         max_cu: float = 2.0,
-        suspend_timeout: str = "300s",
+        suspend_timeout_seconds: int = 300,
     ) -> Endpoint:
         parent = f"projects/{project_id}/branches/{branch_id}"
         name = f"{parent}/endpoints/{endpoint_id}"
@@ -111,7 +112,7 @@ class LakebaseProvisioner:
                         endpoint_type=EndpointType.ENDPOINT_TYPE_READ_WRITE,
                         autoscaling_limit_min_cu=min_cu,
                         autoscaling_limit_max_cu=max_cu,
-                        suspend_timeout_duration=suspend_timeout,
+                        suspend_timeout_duration=Duration(seconds=suspend_timeout_seconds),
                     ),
                 ),
                 endpoint_id=endpoint_id,
@@ -128,7 +129,7 @@ class LakebaseProvisioner:
         branch_id: str,
         postgres_role: str,
         identity_type: RoleIdentityType,
-    ) -> Role:
+    ) -> Role | None:
         parent = f"projects/{project_id}/branches/{branch_id}"
         role_id = postgres_role.replace("@", "-").replace(".", "-").lower()
         name = f"{parent}/roles/{role_id}"
@@ -155,8 +156,9 @@ class LakebaseProvisioner:
             role = op.wait()
             logger.info("role_created", role=role.name)
             return role
-        except AlreadyExists:
-            return self._w.postgres.get_role(name=name)
+        except (AlreadyExists, BadRequest):
+            logger.info("role_already_exists", role=name)
+            return None
 
     def provision_all(
         self,
@@ -171,7 +173,7 @@ class LakebaseProvisioner:
         endpoint = self.ensure_endpoint(project_id, branch_id, endpoint_id)
         self.ensure_role(project_id, branch_id, user_email, RoleIdentityType.USER)
 
-        host = endpoint.status.host if endpoint.status else ""
+        host = endpoint.status.hosts.host if endpoint.status and endpoint.status.hosts else ""
         endpoint_name = f"projects/{project_id}/branches/{branch_id}/endpoints/{endpoint_id}"
 
         return ProvisionResult(
