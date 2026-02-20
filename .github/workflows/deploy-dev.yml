@@ -1,0 +1,40 @@
+name: Deploy to Dev
+
+on:
+  push:
+    branches: [main]
+
+env:
+  DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST }}
+  ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+  ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+  ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+
+jobs:
+  deploy-dev:
+    name: Deploy to Dev
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: databricks/setup-cli@main
+      - run: uv sync
+
+      - name: Deploy bundle (creates app + service principal)
+        run: databricks bundle deploy -t dev
+
+      - name: Provision Lakebase and create roles
+        run: |
+          uv run python -c "
+          from todo_app.infra import LakebaseProvisioner
+          LakebaseProvisioner().provision_ci(app_name='lakebase-todo-app-dev')
+          "
+
+      - name: Run database migrations
+        run: uv run alembic upgrade head
+
+      - name: Deploy app source code
+        run: databricks bundle run -t dev todo_app

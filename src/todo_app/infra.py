@@ -21,6 +21,7 @@ from databricks.sdk.service.postgres import (
     RoleRoleSpec,
 )
 from google.protobuf.duration_pb2 import Duration
+from google.protobuf.field_mask_pb2 import FieldMask
 
 logger = structlog.get_logger()
 
@@ -83,6 +84,24 @@ class LakebaseProvisioner:
             return branch
         except AlreadyExists:
             return self._w.postgres.get_branch(name=name)
+
+    def protect_branch(self, project_id: str, branch_id: str) -> Branch:
+        """Protect a branch from deletion and reset. Idempotent."""
+        name = f"projects/{project_id}/branches/{branch_id}"
+        branch = self._w.postgres.get_branch(name=name)
+        if branch.spec and branch.spec.is_protected:
+            logger.info("branch_already_protected", branch=name)
+            return branch
+
+        logger.info("protecting_branch", branch=name)
+        op = self._w.postgres.update_branch(
+            name=name,
+            branch=Branch(name=name, spec=BranchSpec(is_protected=True)),
+            update_mask=FieldMask(paths=["spec.is_protected"]),
+        )
+        branch = op.wait()
+        logger.info("branch_protected", branch=name)
+        return branch
 
     def ensure_endpoint(
         self,
@@ -183,3 +202,36 @@ class LakebaseProvisioner:
             host=host,
             database="postgres",
         )
+
+    def provision_ci(
+        self,
+        *,
+        project_id: str = "todo-app",
+        branch_id: str = "main",
+        endpoint_id: str = "default",
+        app_name: str | None = None,
+    ) -> None:
+        """Provision infrastructure for CI/CD.
+
+        Ensures Lakebase resources exist, protects the branch, creates a role
+        for the CI service principal, and optionally creates a role for the
+        Databricks App service principal (looked up by app_name).
+        """
+        self.ensure_project(project_id)
+        self.ensure_branch(project_id, branch_id)
+        self.ensure_endpoint(project_id, branch_id, endpoint_id)
+        self.protect_branch(project_id, branch_id)
+
+        # Create role for CI service principal (the identity running this code)
+        ci_sp_id = self._w.config.client_id
+        if ci_sp_id:
+            self.ensure_role(project_id, branch_id, ci_sp_id, RoleIdentityType.SERVICE_PRINCIPAL)
+
+        # Create role for the Databricks App service principal
+        if app_name:
+            app = self._w.apps.get(name=app_name)
+            app_sp_id = app.service_principal_client_id
+            if app_sp_id:
+                self.ensure_role(
+                    project_id, branch_id, app_sp_id, RoleIdentityType.SERVICE_PRINCIPAL
+                )

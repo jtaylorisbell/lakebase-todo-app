@@ -1,0 +1,93 @@
+name: Release to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g., 1.0.0)"
+        required: true
+        type: string
+      release_notes:
+        description: "Release notes (optional)"
+        required: false
+        type: string
+
+env:
+  DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST }}
+  ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+  ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+  ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+
+jobs:
+  test:
+    name: Python Tests
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: uv sync --extra dev
+      - run: uv run ruff check
+      - run: uv run pytest
+
+  deploy-prod:
+    name: Deploy to Production
+    needs: test
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: databricks/setup-cli@main
+      - run: uv sync
+
+      - run: databricks bundle validate -t prod
+
+      - name: Deploy bundle (creates app + service principal)
+        run: databricks bundle deploy -t prod
+
+      - name: Provision Lakebase and create roles
+        run: |
+          uv run python -c "
+          from todo_app.infra import LakebaseProvisioner
+          LakebaseProvisioner().provision_ci(app_name='lakebase-todo-app-prod')
+          "
+
+      - name: Run database migrations
+        run: uv run alembic upgrade head
+
+      - name: Deploy app source code
+        run: databricks bundle run -t prod todo_app
+
+  create-release:
+    name: Create GitHub Release
+    needs: deploy-prod
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create Git tag
+        run: |
+          git tag "v${VERSION}"
+          git push origin "v${VERSION}"
+        env:
+          VERSION: ${{ inputs.version }}
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+        run: |
+          if [ -n "$RELEASE_NOTES" ]; then
+            gh release create "v${VERSION}" --title "v${VERSION}" --notes "$RELEASE_NOTES"
+          else
+            gh release create "v${VERSION}" --title "v${VERSION}" --generate-notes
+          fi
