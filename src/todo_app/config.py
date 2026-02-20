@@ -63,6 +63,7 @@ class OAuthTokenManager:
 
 
 _token_manager = OAuthTokenManager()
+_resolved_endpoints: dict[str, str] = {}
 
 
 class LakebaseSettings(BaseSettings):
@@ -108,10 +109,35 @@ class LakebaseSettings(BaseSettings):
 
         return WorkspaceClient()
 
+    def get_endpoint_name(self) -> str:
+        """Resolve the actual endpoint name, discovering it if the configured ID doesn't exist.
+
+        The default production branch may have an auto-provisioned endpoint with
+        a different ID than 'default'. This method tries the configured name first,
+        then falls back to listing endpoints on the branch.
+        """
+        from databricks.sdk.errors import NotFound
+
+        expected = self.endpoint_name
+        if expected in _resolved_endpoints:
+            return _resolved_endpoints[expected]
+
+        w = self._get_workspace_client()
+        try:
+            w.postgres.get_endpoint(name=expected)
+            _resolved_endpoints[expected] = expected
+            return expected
+        except NotFound:
+            parent = f"projects/{self.project_id}/branches/{self.get_branch_id()}"
+            for ep in w.postgres.list_endpoints(parent=parent):
+                _resolved_endpoints[expected] = ep.name
+                return ep.name
+            raise
+
     def get_host(self) -> str:
         """Resolve the Postgres host dynamically from the Lakebase endpoint."""
         w = self._get_workspace_client()
-        endpoint = w.postgres.get_endpoint(name=self.endpoint_name)
+        endpoint = w.postgres.get_endpoint(name=self.get_endpoint_name())
         return endpoint.status.hosts.host
 
     def get_user(self) -> str:
@@ -137,7 +163,7 @@ class LakebaseSettings(BaseSettings):
             return self.password
 
         if self.project_id:
-            token = _token_manager.get_token(endpoint_name=self.endpoint_name)
+            token = _token_manager.get_token(endpoint_name=self.get_endpoint_name())
             if token:
                 return token
 
