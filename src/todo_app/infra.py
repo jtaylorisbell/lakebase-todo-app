@@ -162,6 +162,17 @@ class LakebaseProvisioner:
             return endpoint
         except AlreadyExists:
             return self._w.postgres.get_endpoint(name=name)
+        except BadRequest as e:
+            if "already exists" not in str(e):
+                raise
+            # A read_write endpoint exists with a different ID (e.g. auto-provisioned
+            # on the default production branch). Find it.
+            logger.info("endpoint_exists_different_id", expected=name, error=str(e))
+            for ep in self._w.postgres.list_endpoints(parent=parent):
+                if ep.spec and ep.spec.endpoint_type == EndpointType.ENDPOINT_TYPE_READ_WRITE:
+                    logger.info("endpoint_found", endpoint=ep.name)
+                    return ep
+            raise
 
     def ensure_role(
         self,
