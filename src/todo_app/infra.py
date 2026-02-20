@@ -182,6 +182,9 @@ class LakebaseProvisioner:
     ) -> Role | None:
         parent = f"projects/{project_id}/branches/{branch_id}"
         role_id = postgres_role.replace("@", "-").replace(".", "-").lower()
+        # role_id must match ^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$
+        if role_id and not role_id[0].isalpha():
+            role_id = f"sp-{role_id}"
         name = f"{parent}/roles/{role_id}"
         try:
             role = self._w.postgres.get_role(name=name)
@@ -314,9 +317,16 @@ class LakebaseProvisioner:
         self.protect_branch(project_id, branch_id)
 
         # Create role for CI service principal (the identity running this code)
-        ci_sp_id = self._w.config.client_id
+        me = self._w.current_user.me()
+        ci_sp_id = (
+            self._w.config.client_id
+            or self._w.config.azure_client_id
+        )
         if ci_sp_id:
-            self.ensure_role(project_id, branch_id, ci_sp_id, RoleIdentityType.SERVICE_PRINCIPAL)
+            self.ensure_role(
+                project_id, branch_id, me.user_name,
+                RoleIdentityType.SERVICE_PRINCIPAL,
+            )
 
         # Create role for the Databricks App service principal
         if app_name:
