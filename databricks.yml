@@ -44,15 +44,10 @@ variables:
 # Target environments
 targets:
   dev:
-    mode: development
     default: true
     workspace:
-      profile: todo-app-dev
-      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/dev
+      root_path: /Workspace/.bundle/${bundle.name}/dev
 
   prod:
-    mode: production
     workspace:
-      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/prod
-    run_as:
-      user_name: ${workspace.current_user.userName}
+      root_path: /Workspace/.bundle/${bundle.name}/prod
