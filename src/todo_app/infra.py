@@ -206,8 +206,8 @@ class LakebaseProvisioner:
             role = op.wait()
             logger.info("role_created", role=role.name)
             return role
-        except (AlreadyExists, BadRequest):
-            logger.info("role_already_exists", role=name)
+        except (AlreadyExists, BadRequest) as e:
+            logger.info("role_already_exists", role=name, error=str(e))
             return None
 
     def provision_all(
@@ -241,36 +241,57 @@ class LakebaseProvisioner:
         database: str,
     ) -> None:
         """Create the application database if it doesn't exist."""
+        import time
+
         import psycopg
 
         host = endpoint.status.hosts.host
-        user = self._w.config.client_id or self._w.current_user.me().user_name
+        me = self._w.current_user.me()
+        user = me.user_name
         cred = self._w.postgres.generate_database_credential(endpoint=endpoint_name)
 
         logger.info(
             "connecting_to_create_database",
             host=host,
             user=user,
+            config_client_id=self._w.config.client_id,
+            me_user_name=me.user_name,
+            me_display_name=me.display_name,
             endpoint=endpoint_name,
             database=database,
+            token_length=len(cred.token) if cred.token else 0,
         )
 
-        conn = psycopg.connect(
-            host=host,
-            port=5432,
-            dbname="postgres",
-            user=user,
-            password=cred.token,
-            sslmode="require",
-            autocommit=True,
-        )
-        try:
-            conn.execute(f"CREATE DATABASE {database}")
-            logger.info("database_created", database=database)
-        except psycopg.errors.DuplicateDatabase:
-            logger.info("database_exists", database=database)
-        finally:
-            conn.close()
+        last_error = None
+        for attempt in range(3):
+            if attempt > 0:
+                logger.info("retrying_database_connection", attempt=attempt + 1, wait=5)
+                time.sleep(5)
+                cred = self._w.postgres.generate_database_credential(endpoint=endpoint_name)
+
+            try:
+                conn = psycopg.connect(
+                    host=host,
+                    port=5432,
+                    dbname="postgres",
+                    user=user,
+                    password=cred.token,
+                    sslmode="require",
+                    autocommit=True,
+                )
+                try:
+                    conn.execute(f"CREATE DATABASE {database}")
+                    logger.info("database_created", database=database)
+                except psycopg.errors.DuplicateDatabase:
+                    logger.info("database_exists", database=database)
+                finally:
+                    conn.close()
+                return
+            except psycopg.OperationalError as e:
+                last_error = e
+                logger.warning("database_connection_failed", attempt=attempt + 1, error=str(e))
+
+        raise last_error
 
     def provision_ci(
         self,
