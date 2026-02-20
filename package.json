@@ -1,0 +1,8 @@
+{
+  "name": "lakebase-todo-app",
+  "private": true,
+  "scripts": {
+    "postinstall": "cd frontend && npm install",
+    "build": "cd frontend && npm run build"
+  }
+}
