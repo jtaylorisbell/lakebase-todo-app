@@ -21,9 +21,23 @@ from databricks.sdk.service.postgres import (
     RoleRoleSpec,
 )
 from google.protobuf.duration_pb2 import Duration
-from google.protobuf.field_mask_pb2 import FieldMask
 
 logger = structlog.get_logger()
+
+
+class _SnakeCaseFieldMask:
+    """FieldMask that preserves snake_case paths.
+
+    The protobuf FieldMask.ToJsonString() auto-converts to camelCase, but
+    the Lakebase API expects snake_case field paths. This duck-typed wrapper
+    implements ToJsonString() without the camelCase conversion.
+    """
+
+    def __init__(self, paths: list[str]):
+        self._paths = paths
+
+    def ToJsonString(self) -> str:  # noqa: N802
+        return ",".join(self._paths)
 
 
 @dataclass
@@ -97,7 +111,7 @@ class LakebaseProvisioner:
         op = self._w.postgres.update_branch(
             name=name,
             branch=Branch(name=name, spec=BranchSpec(is_protected=True)),
-            update_mask=FieldMask(paths=["spec.is_protected"]),
+            update_mask=_SnakeCaseFieldMask(["spec.is_protected"]),
         )
         branch = op.wait()
         logger.info("branch_protected", branch=name)
