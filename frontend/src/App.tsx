@@ -13,9 +13,9 @@ import {
   BarChart3,
   Flag,
 } from 'lucide-react';
+import { formatDistanceToNow } from 'date-fns';
 import { api } from './api/client';
 import type { CreateTodoRequest, Priority, Todo } from './types/api';
-import { formatDistanceToNow } from 'date-fns';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -28,38 +28,55 @@ const queryClient = new QueryClient({
 
 type FilterMode = 'all' | 'active' | 'completed';
 
-function priorityLabel(p: Priority) {
-  return p.charAt(0).toUpperCase() + p.slice(1);
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-function priorityDotClass(p: Priority) {
-  return p === 'high' ? 'priority-dot-high' : p === 'medium' ? 'priority-dot-medium' : 'priority-dot-low';
+const PRIORITY_DOT_CLASSES: Record<Priority, string> = {
+  high: 'priority-dot-high',
+  medium: 'priority-dot-medium',
+  low: 'priority-dot-low',
+};
+
+const PRIORITY_BADGE_CLASSES: Record<Priority, string> = {
+  high: 'bg-[var(--accent-danger-dim)] text-[var(--accent-danger)]',
+  medium: 'bg-[var(--accent-warning-dim)] text-[var(--accent-warning)]',
+  low: 'bg-[var(--bg-elevated)] text-[var(--text-muted)]',
+};
+
+const PRIORITY_ACTIVE_CLASSES: Record<Priority, string> = {
+  high: 'bg-[var(--accent-danger)] text-white',
+  medium: 'bg-[var(--accent-warning)] text-white',
+  low: 'bg-[var(--text-muted)] text-white',
+};
+
+function useInvalidateTodos() {
+  const qc = useQueryClient();
+  return () => {
+    qc.invalidateQueries({ queryKey: ['todos'] });
+    qc.invalidateQueries({ queryKey: ['stats'] });
+  };
 }
 
 function TodoItem({ todo }: { todo: Todo }) {
-  const qc = useQueryClient();
+  const invalidate = useInvalidateTodos();
 
   const toggleMutation = useMutation({
     mutationFn: () => api.toggleTodo(todo.id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['todos'] });
-      qc.invalidateQueries({ queryKey: ['stats'] });
-    },
+    onSuccess: invalidate,
   });
 
   const deleteMutation = useMutation({
     mutationFn: () => api.deleteTodo(todo.id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['todos'] });
-      qc.invalidateQueries({ queryKey: ['stats'] });
-    },
+    onSuccess: invalidate,
   });
+
+  const completedStyle = todo.completed ? 'line-through text-[var(--text-muted)]' : '';
 
   return (
     <div className={`card group px-5 py-4 flex items-start gap-4 animate-fade-in-up ${
       todo.completed ? 'opacity-60' : ''
     }`}>
-      {/* Checkbox */}
       <button
         onClick={() => toggleMutation.mutate()}
         className="mt-0.5 flex-shrink-0"
@@ -72,40 +89,26 @@ function TodoItem({ todo }: { todo: Todo }) {
         )}
       </button>
 
-      {/* Content */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <span className={`priority-dot ${priorityDotClass(todo.priority)}`} />
-          <h3 className={`text-base font-medium ${
-            todo.completed
-              ? 'line-through text-[var(--text-muted)]'
-              : 'text-[var(--text-primary)]'
-          }`}>
+          <span className={`priority-dot ${PRIORITY_DOT_CLASSES[todo.priority]}`} />
+          <h3 className={`text-base font-medium ${completedStyle || 'text-[var(--text-primary)]'}`}>
             {todo.title}
           </h3>
         </div>
         {todo.description && (
-          <p className={`mt-1 text-sm ${
-            todo.completed ? 'text-[var(--text-muted)] line-through' : 'text-[var(--text-secondary)]'
-          }`}>
+          <p className={`mt-1 text-sm ${completedStyle || 'text-[var(--text-secondary)]'}`}>
             {todo.description}
           </p>
         )}
         <div className="mt-2 flex items-center gap-3 text-xs text-[var(--text-muted)]">
           <span>{formatDistanceToNow(new Date(todo.created_at), { addSuffix: true })}</span>
-          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-            todo.priority === 'high'
-              ? 'bg-[var(--accent-danger-dim)] text-[var(--accent-danger)]'
-              : todo.priority === 'medium'
-              ? 'bg-[var(--accent-warning-dim)] text-[var(--accent-warning)]'
-              : 'bg-[var(--bg-elevated)] text-[var(--text-muted)]'
-          }`}>
-            {priorityLabel(todo.priority)}
+          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${PRIORITY_BADGE_CLASSES[todo.priority]}`}>
+            {capitalize(todo.priority)}
           </span>
         </div>
       </div>
 
-      {/* Delete */}
       <button
         onClick={() => deleteMutation.mutate()}
         className="opacity-0 group-hover:opacity-100 p-2 rounded-lg hover:bg-[var(--accent-danger-dim)] text-[var(--text-muted)] hover:text-[var(--accent-danger)]"
@@ -118,7 +121,7 @@ function TodoItem({ todo }: { todo: Todo }) {
 }
 
 function AddTodoForm() {
-  const qc = useQueryClient();
+  const invalidate = useInvalidateTodos();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<Priority>('medium');
@@ -127,8 +130,7 @@ function AddTodoForm() {
   const createMutation = useMutation({
     mutationFn: (data: CreateTodoRequest) => api.createTodo(data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['todos'] });
-      qc.invalidateQueries({ queryKey: ['stats'] });
+      invalidate();
       setTitle('');
       setDescription('');
       setPriority('medium');
@@ -193,15 +195,11 @@ function AddTodoForm() {
                 onClick={() => setPriority(p)}
                 className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${
                   priority === p
-                    ? p === 'high'
-                      ? 'bg-[var(--accent-danger)] text-white'
-                      : p === 'medium'
-                      ? 'bg-[var(--accent-warning)] text-white'
-                      : 'bg-[var(--text-muted)] text-white'
+                    ? PRIORITY_ACTIVE_CLASSES[p]
                     : 'bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
                 }`}
               >
-                {priorityLabel(p)}
+                {capitalize(p)}
               </button>
             ))}
           </div>
@@ -304,7 +302,6 @@ function AppContent() {
 
   return (
     <div className="min-h-screen bg-[var(--bg-primary)]">
-      {/* Header */}
       <header className="bg-[var(--bg-secondary)] border-b border-[var(--border-primary)] sticky top-0 z-40">
         <div className="max-w-3xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
@@ -337,15 +334,10 @@ function AppContent() {
         </div>
       </header>
 
-      {/* Main */}
       <main className="max-w-3xl mx-auto px-6 py-8 space-y-6">
-        {/* Stats */}
         <StatsBar />
-
-        {/* Add Form */}
         <AddTodoForm />
 
-        {/* Filter Tabs */}
         <div className="flex items-center gap-1 p-1 bg-[var(--bg-elevated)] rounded-xl w-fit">
           {(['all', 'active', 'completed'] as FilterMode[]).map((f) => (
             <button
@@ -357,12 +349,11 @@ function AppContent() {
                   : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
               }`}
             >
-              {f.charAt(0).toUpperCase() + f.slice(1)}
+              {capitalize(f)}
             </button>
           ))}
         </div>
 
-        {/* Todo List */}
         <div className="space-y-2">
           {todosLoading ? (
             <div className="space-y-2">
@@ -386,7 +377,6 @@ function AppContent() {
         </div>
       </main>
 
-      {/* Footer */}
       <footer className="mt-8 py-6 border-t border-[var(--border-primary)]">
         <div className="max-w-3xl mx-auto px-6 flex items-center justify-center text-xs text-[var(--text-muted)] gap-1">
           <span>Lakebase Todo v0.1.0</span>

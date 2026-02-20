@@ -227,12 +227,11 @@ class LakebaseProvisioner:
         self.ensure_role(project_id, branch_id, user_email, RoleIdentityType.USER)
 
         host = endpoint.status.hosts.host if endpoint.status and endpoint.status.hosts else ""
-        endpoint_name = f"projects/{project_id}/branches/{branch_id}/endpoints/{endpoint_id}"
 
         return ProvisionResult(
             project_name=f"projects/{project_id}",
             branch_name=f"projects/{project_id}/branches/{branch_id}",
-            endpoint_name=endpoint_name,
+            endpoint_name=endpoint.name,
             host=host,
             database="postgres",
         )
@@ -257,12 +256,9 @@ class LakebaseProvisioner:
         self.protect_branch(project_id, branch_id)
 
         # Create role for CI service principal (the identity running this code)
-        me = self._w.current_user.me()
-        ci_sp_id = (
-            self._w.config.client_id
-            or self._w.config.azure_client_id
-        )
-        if ci_sp_id:
+        is_service_principal = self._w.config.client_id or self._w.config.azure_client_id
+        if is_service_principal:
+            me = self._w.current_user.me()
             self.ensure_role(
                 project_id, branch_id, me.user_name,
                 RoleIdentityType.SERVICE_PRINCIPAL,
@@ -270,8 +266,7 @@ class LakebaseProvisioner:
 
         # Create role for the Databricks App service principal
         if app_name:
-            app = self._w.apps.get(name=app_name)
-            app_sp_id = app.service_principal_client_id
+            app_sp_id = self._w.apps.get(name=app_name).service_principal_client_id
             if app_sp_id:
                 self.ensure_role(
                     project_id, branch_id, app_sp_id,

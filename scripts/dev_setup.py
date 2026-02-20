@@ -52,14 +52,15 @@ def _run_migrations() -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Set up local dev environment")
     parser.add_argument("--branch", help="Branch name (default: dev-{username})")
-    parser.add_argument("--project", default="todo-app", help="Lakebase project ID (default: todo-app)")
+    parser.add_argument(
+        "--project", default="todo-app", help="Lakebase project ID (default: todo-app)",
+    )
     parser.add_argument("--endpoint", default="default", help="Endpoint ID (default: default)")
     parser.add_argument(
         "--skip-migrations", action="store_true", help="Skip running alembic migrations"
     )
     args = parser.parse_args()
 
-    # Step 1: Validate Databricks auth
     print("Validating Databricks authentication...")
     try:
         w = WorkspaceClient()
@@ -70,13 +71,11 @@ def main() -> None:
         print("\nRun: databricks auth login --host https://your-workspace.cloud.databricks.com")
         sys.exit(1)
 
-    # Step 2: Resolve config from args
     branch_id = args.branch or _derive_branch_id(w)
     project_id = args.project
     endpoint_id = args.endpoint
     print(f"\nProvisioning Lakebase: {project_id}/{branch_id}/{endpoint_id}")
 
-    # Step 3: Provision infrastructure (all idempotent)
     provisioner = LakebaseProvisioner(w)
     provisioner.ensure_project(project_id)
     provisioner.ensure_branch(project_id, branch_id)
@@ -86,7 +85,6 @@ def main() -> None:
     host = endpoint.status.hosts.host if endpoint.status and endpoint.status.hosts else ""
     print(f"  Endpoint host: {host}")
 
-    # Step 4: Run migrations (creates the database if it doesn't exist)
     if args.skip_migrations:
         print("\nSkipping migrations (--skip-migrations)")
     else:
@@ -97,15 +95,6 @@ def main() -> None:
         os.environ["LAKEBASE_ENDPOINT_ID"] = endpoint_id
         _run_migrations()
 
-    # Determine if the user overrode any defaults
-    default_branch = _derive_branch_id(w)
-    uses_defaults = (
-        project_id == "todo-app"
-        and branch_id == default_branch
-        and endpoint_id == "default"
-    )
-
-    # Summary
     print("\n" + "=" * 60)
     print("Setup complete!")
     print("=" * 60)
@@ -113,27 +102,24 @@ def main() -> None:
     print(f"  Branch:   {branch_id}")
     print(f"  Endpoint: {endpoint_id}")
     print(f"  Host:     {host}")
-    print()
-    print("Start your servers:")
-    if uses_defaults:
-        print("  # Terminal 1 — Backend (auto-detects your branch)")
-        print("  uv run uvicorn app:app --reload --host 0.0.0.0 --port 8000")
-    else:
-        env_parts = []
-        if project_id != "todo-app":
-            env_parts.append(f"LAKEBASE_PROJECT_ID={project_id}")
-        if branch_id != default_branch:
-            env_parts.append(f"LAKEBASE_BRANCH_ID={branch_id}")
-        if endpoint_id != "default":
-            env_parts.append(f"LAKEBASE_ENDPOINT_ID={endpoint_id}")
-        env_prefix = " ".join(env_parts)
-        print("  # Terminal 1 — Backend (using your custom config)")
-        print(f"  {env_prefix} uv run uvicorn app:app --reload --host 0.0.0.0 --port 8000")
-    print()
-    print("  # Terminal 2 — Frontend")
+
+    # Build env prefix for non-default config values
+    default_branch = _derive_branch_id(w)
+    env_parts = []
+    if project_id != "todo-app":
+        env_parts.append(f"LAKEBASE_PROJECT_ID={project_id}")
+    if branch_id != default_branch:
+        env_parts.append(f"LAKEBASE_BRANCH_ID={branch_id}")
+    if endpoint_id != "default":
+        env_parts.append(f"LAKEBASE_ENDPOINT_ID={endpoint_id}")
+    env_prefix = " ".join(env_parts) + " " if env_parts else ""
+
+    print("\nStart your servers:")
+    print("  # Terminal 1 - Backend")
+    print(f"  {env_prefix}uv run uvicorn app:app --reload --host 0.0.0.0 --port 8000")
+    print("  # Terminal 2 - Frontend")
     print("  cd frontend && npm run dev")
-    print()
-    print("Open http://localhost:5173")
+    print("\nOpen http://localhost:5173")
 
 
 if __name__ == "__main__":

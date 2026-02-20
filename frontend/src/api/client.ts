@@ -10,7 +10,7 @@ import type {
 
 const API_BASE = '/api';
 
-class ApiError extends Error {
+export class ApiError extends Error {
   constructor(
     message: string,
     public status: number
@@ -75,5 +75,3 @@ export const api = {
 
   getStats: () => request<TodoStats>('/stats'),
 };
-
-export { ApiError };

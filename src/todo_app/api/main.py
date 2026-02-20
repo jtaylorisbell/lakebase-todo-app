@@ -19,7 +19,6 @@ from todo_app.api.schemas import (
     UpdateTodoRequest,
 )
 from todo_app.api.user import get_current_user
-from todo_app.core.models import Priority
 from todo_app.db.postgres import get_db
 
 logger = structlog.get_logger()
@@ -37,11 +36,10 @@ def _check_migrations() -> None:
         head = ScriptDirectory.from_config(alembic_cfg).get_current_head()
 
         db = get_db()
-        with db.session() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT version_num FROM alembic_version")
-                row = cur.fetchone()
-                current = row[0] if row else None
+        with db.session() as conn, conn.cursor() as cur:
+            cur.execute("SELECT version_num FROM alembic_version")
+            row = cur.fetchone()
+            current = row[0] if row else None
 
         if current is None:
             logger.warning(
@@ -160,6 +158,8 @@ async def toggle_todo(todo_id: str) -> TodoResponse:
     if existing is None:
         raise HTTPException(status_code=404, detail="Todo not found")
     todo = db.update_todo(todo_id=todo_id, completed=not existing["completed"])
+    if todo is None:
+        raise HTTPException(status_code=404, detail="Todo not found")
     return TodoResponse(**todo)
 
 
@@ -178,7 +178,6 @@ async def get_stats(request: Request) -> TodoStatsResponse:
     return TodoStatsResponse(**stats)
 
 
-# Serve frontend static files
 def _find_project_root() -> Path:
     from_main = Path(__file__).parent.parent.parent.parent
     if (from_main / "frontend").exists():
@@ -193,4 +192,6 @@ PROJECT_ROOT = _find_project_root()
 
 frontend_dist = PROJECT_ROOT / "frontend" / "dist"
 if frontend_dist.exists():
-    app.mount("/", StaticFiles(directory=str(frontend_dist), html=True), name="frontend")
+    app.mount(
+        "/", StaticFiles(directory=str(frontend_dist), html=True), name="frontend"
+    )

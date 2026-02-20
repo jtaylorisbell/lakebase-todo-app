@@ -13,8 +13,9 @@ import sys
 from pathlib import Path
 from urllib.parse import quote_plus
 
-from alembic import context
 from sqlalchemy import engine_from_config, pool
+
+from alembic import context
 
 # Ensure src/ is importable
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -47,25 +48,19 @@ def _ensure_database(lb: LakebaseSettings) -> None:
     """Create the application database if it doesn't exist."""
     import psycopg
 
-    host = lb.get_host()
-    user = lb.get_user()
-    password = lb.get_password()
-
-    conn = psycopg.connect(
-        host=host,
+    with psycopg.connect(
+        host=lb.get_host(),
         port=5432,
         dbname="postgres",
-        user=user,
-        password=password,
+        user=lb.get_user(),
+        password=lb.get_password(),
         sslmode="require",
         autocommit=True,
-    )
-    try:
-        conn.execute(f"CREATE DATABASE {lb.database}")
-    except psycopg.errors.DuplicateDatabase:
-        pass
-    finally:
-        conn.close()
+    ) as conn:
+        try:
+            conn.execute(f"CREATE DATABASE {lb.database}")
+        except psycopg.errors.DuplicateDatabase:
+            pass
 
 
 def run_migrations_offline() -> None:
