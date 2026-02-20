@@ -34,6 +34,9 @@ jobs:
           "
 
       - name: Run database migrations
+        env:
+          LAKEBASE_BRANCH_ID: production
+          LAKEBASE_ENDPOINT_ID: primary
         run: uv run alembic upgrade head
 
       - name: Deploy app source code

@@ -17,6 +17,6 @@ env:
   - name: LAKEBASE_BRANCH_ID
     value: "production"
   - name: LAKEBASE_ENDPOINT_ID
-    value: "default"
+    value: "primary"
   - name: LAKEBASE_DATABASE
     value: "todoapp"
