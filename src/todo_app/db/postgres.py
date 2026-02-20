@@ -50,7 +50,7 @@ class LakebaseConnectionFactory:
             settings = get_settings()
             self._postgres_host = settings.lakebase.get_host()
             self._postgres_database = settings.lakebase.database
-            self._postgres_username = settings.lakebase.user
+            self._postgres_username = settings.lakebase.get_user()
             self._endpoint_name = settings.lakebase.endpoint_name
 
             logger.info(

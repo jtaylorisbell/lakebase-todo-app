@@ -27,9 +27,10 @@ def _build_url() -> str:
     """Build a SQLAlchemy database URL from LakebaseSettings + OAuth."""
     lb = LakebaseSettings()
     host = lb.get_host()
+    user = lb.get_user()
     password = lb.get_password()
     return (
-        f"postgresql+psycopg2://{quote_plus(lb.user)}:{quote_plus(password)}"
+        f"postgresql+psycopg2://{quote_plus(user)}:{quote_plus(password)}"
         f"@{host}:5432/{lb.database}"
         f"?sslmode=require"
     )

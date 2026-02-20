@@ -74,7 +74,7 @@ class LakebaseSettings(BaseSettings):
     )
 
     database: str = "todoapp"
-    user: str = "lakebase"
+    user: str = ""
     password: str = ""
     project_id: str = "todo-app"
     branch_id: str = "main"
@@ -84,13 +84,33 @@ class LakebaseSettings(BaseSettings):
     def endpoint_name(self) -> str:
         return f"projects/{self.project_id}/branches/{self.branch_id}/endpoints/{self.endpoint_id}"
 
-    def get_host(self) -> str:
-        """Resolve the Postgres host dynamically from the Lakebase endpoint."""
+    def _get_workspace_client(self):
         from databricks.sdk import WorkspaceClient
 
-        w = WorkspaceClient()
+        return WorkspaceClient()
+
+    def get_host(self) -> str:
+        """Resolve the Postgres host dynamically from the Lakebase endpoint."""
+        w = self._get_workspace_client()
         endpoint = w.postgres.get_endpoint(name=self.endpoint_name)
         return endpoint.status.hosts.host
+
+    def get_user(self) -> str:
+        """Get the Postgres user, auto-detecting from Databricks identity if not set.
+
+        The Postgres role name must match the identity:
+        - Service principal: client_id (e.g. '64cabdb0-...')
+        - User: email (e.g. 'user@company.com')
+        """
+        if self.user:
+            return self.user
+
+        w = self._get_workspace_client()
+        if w.config.client_id:
+            return w.config.client_id
+
+        me = w.current_user.me()
+        return me.user_name
 
     def get_password(self) -> str:
         """Get the database password, generating an OAuth token if needed."""
