@@ -142,14 +142,8 @@ for branch in ['main', 'local-dev']:
 
 ### 4. Run database migrations
 
-Apply migrations to both branches:
-
 ```bash
-# Local dev branch (from .env)
 uv run alembic upgrade head
-
-# Main branch (for deployments)
-LAKEBASE_BRANCH_ID=main uv run alembic upgrade head
 ```
 
 The app checks for pending migrations on startup and logs a warning if the database is behind — but it won't auto-migrate, so you always run migrations deliberately.
@@ -262,6 +256,9 @@ databricks bundle validate -t dev
 
 # Deploy to the dev target
 databricks bundle deploy -t dev
+
+# Run the app (deploys source code and starts it)
+databricks bundle run -t dev todo_app
 
 # Deploy to production
 databricks bundle deploy -t prod

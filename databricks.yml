@@ -15,14 +15,16 @@ include:
 
 # Workspace sync configuration
 sync:
-  include:
-    - src/**
-    - frontend/dist/**
-    - sql/**
-    - app.py
-    - app.yaml
-    - pyproject.toml
-    - requirements.txt
+  exclude:
+    - node_modules/
+    - frontend/node_modules/
+    - frontend/dist/
+    - .venv/
+    - __pycache__/
+    - "*.egg-info/"
+    - .env
+    - .env.local
+    - uv.lock
 
 # Variables with defaults (can be overridden per target)
 variables:
@@ -45,7 +47,7 @@ targets:
     mode: development
     default: true
     workspace:
-      profile: fe-sandbox
+      profile: todo-app-dev
       root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/dev
 
   prod:
