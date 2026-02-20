@@ -77,12 +77,31 @@ class LakebaseSettings(BaseSettings):
     user: str = ""
     password: str = ""
     project_id: str = "todo-app"
-    branch_id: str = "main"
+    branch_id: str = ""
     endpoint_id: str = "default"
+
+    def get_branch_id(self) -> str:
+        """Get the branch ID, auto-detecting from Databricks identity if not set.
+
+        Convention:
+        - Explicit branch_id env var → use it
+        - Service principal → "main"
+        - User → "dev-{username}" derived from email
+        """
+        if self.branch_id:
+            return self.branch_id
+
+        w = self._get_workspace_client()
+        if w.config.client_id:
+            return "production"
+
+        me = w.current_user.me()
+        username = me.user_name.split("@")[0].replace(".", "-").lower()
+        return f"dev-{username}"
 
     @property
     def endpoint_name(self) -> str:
-        return f"projects/{self.project_id}/branches/{self.branch_id}/endpoints/{self.endpoint_id}"
+        return f"projects/{self.project_id}/branches/{self.get_branch_id()}/endpoints/{self.endpoint_id}"
 
     def _get_workspace_client(self):
         from databricks.sdk import WorkspaceClient
@@ -135,6 +154,30 @@ class UserSettings(BaseSettings):
 
     email: str = ""
     name: str = ""
+
+    def get_email(self) -> str:
+        """Get user email, auto-detecting from Databricks identity if not set."""
+        if self.email:
+            return self.email
+        try:
+            from databricks.sdk import WorkspaceClient
+
+            me = WorkspaceClient().current_user.me()
+            return me.user_name
+        except Exception:
+            return self.email
+
+    def get_name(self) -> str:
+        """Get user display name, auto-detecting from Databricks identity if not set."""
+        if self.name:
+            return self.name
+        try:
+            from databricks.sdk import WorkspaceClient
+
+            me = WorkspaceClient().current_user.me()
+            return me.display_name or ""
+        except Exception:
+            return self.name
 
 
 class Settings(BaseSettings):

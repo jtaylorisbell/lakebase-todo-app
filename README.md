@@ -51,104 +51,48 @@ lakebase-todo-app/
 
 - [uv](https://docs.astral.sh/uv/) (Python package manager)
 - [Node.js](https://nodejs.org/) >= 18
-- [Databricks CLI](https://docs.databricks.com/dev-tools/cli/index.html) configured with a workspace profile
-- A Databricks workspace with Lakebase enabled
+- [Databricks CLI](https://docs.databricks.com/dev-tools/cli/index.html)
+- **Can Manage** permission on the Lakebase project in your workspace
 
 ## Local Development
+
+All configuration is auto-detected from the Databricks SDK — no `.env` file needed. The setup script provisions your personal Lakebase branch, creates the database, and runs migrations.
 
 ### 1. Clone and install dependencies
 
 ```bash
 git clone <repo-url> && cd lakebase-todo-app
-
-# Python dependencies
 uv sync
-
-# Frontend dependencies
 cd frontend && npm install && cd ..
 ```
 
-### 2. Configure environment
-
-Authenticate with the Databricks CLI and set the profile so the SDK can resolve your workspace:
+### 2. Authenticate with Databricks
 
 ```bash
-databricks auth login --host https://your-workspace.cloud.databricks.com --profile my-profile
-export DATABRICKS_CONFIG_PROFILE=my-profile
+databricks auth login --host https://your-workspace.cloud.databricks.com
 ```
 
-Then create your `.env`:
+### 3. Run the setup script
 
 ```bash
-cp .env.example .env
+uv run python scripts/dev_setup.py
 ```
 
-Edit `.env` with your details:
+This will:
+- Detect your identity from the Databricks SDK
+- Create a personal Lakebase branch named `dev-{username}` (e.g., `dev-alex-lopez`)
+- Provision the endpoint and Postgres role
+- Create the `todoapp` database
+- Run Alembic migrations
 
-```env
-LAKEBASE_PROJECT_ID=todo-app
-LAKEBASE_BRANCH_ID=local-dev
-LAKEBASE_ENDPOINT_ID=default
-LAKEBASE_DATABASE=todoapp
-LAKEBASE_USER=your.email@company.com
-
-USER_EMAIL=your.email@company.com
-USER_NAME=Your Name
-```
-
-The endpoint host, port, SSL mode, and workspace URL are all resolved automatically from the Databricks SDK — no need to configure them.
-
-### 3. Provision Lakebase infrastructure (first time only)
-
-Provision the Lakebase project with both branches — `main` for the deployed app and `local-dev` for local development:
+Options:
 
 ```bash
-uv run python -c "
-from todo_app.infra import LakebaseProvisioner
-p = LakebaseProvisioner()
-
-# Provision main branch (used by the deployed app)
-result = p.provision_all(user_email='your.email@company.com')
-print(f'main endpoint: {result.host}')
-
-# Provision local-dev branch (used for local development)
-p.ensure_branch('todo-app', 'local-dev')
-p.ensure_endpoint('todo-app', 'local-dev', 'default')
-print('local-dev branch provisioned')
-"
+uv run python scripts/dev_setup.py --branch my-feature   # custom branch name
+uv run python scripts/dev_setup.py --skip-migrations      # skip alembic
 ```
 
-Then create the `todoapp` database on each branch. The default `postgres` database restricts CREATE permissions, so a dedicated database is needed:
-
-```bash
-uv run python -c "
-from todo_app.config import LakebaseSettings, _token_manager
-import psycopg2
-
-for branch in ['main', 'local-dev']:
-    lb = LakebaseSettings(branch_id=branch)
-    host = lb.get_host()
-    token = lb.get_password()
-    conn = psycopg2.connect(host=host, port=5432, dbname='postgres',
-        user=lb.user, password=token, sslmode='require')
-    conn.autocommit = True
-    conn.cursor().execute('CREATE DATABASE todoapp')
-    print(f'Created todoapp database on {branch} branch')
-    conn.close()
-"
-```
-
-### 4. Run database migrations
-
-```bash
-uv run alembic upgrade head
-```
-
-The app checks for pending migrations on startup and logs a warning if the database is behind — but it won't auto-migrate, so you always run migrations deliberately.
-
-### 5. Start the development servers
-
-Run the backend and frontend in separate terminals:
+### 4. Start the development servers
 
 ```bash
 # Terminal 1 — Backend (FastAPI on port 8000)
@@ -158,22 +102,25 @@ uv run uvicorn app:app --reload --host 0.0.0.0 --port 8000
 cd frontend && npm run dev
 ```
 
-Open http://localhost:5173 in your browser. The Vite dev server proxies all `/api` requests to the FastAPI backend.
+Open http://localhost:5173 in your browser.
+
+> **Note:** `.env` is optional. If present, its values override auto-detected config. See `.env.example` for available settings.
 
 ## Branching Strategy
 
-The app uses [Lakebase branches](https://docs.databricks.com/en/lakebase/) to isolate local development from the deployed application:
+Each developer gets an isolated [Lakebase branch](https://docs.databricks.com/en/lakebase/) derived from their Databricks identity:
 
-| Branch | Used by | Configured in |
+| Branch | Used by | How it's resolved |
 |---|---|---|
-| `main` | Deployed Databricks App | `app.yaml` |
-| `local-dev` | Local development | `.env` |
+| `production` | Deployed app + CI | Default Lakebase branch; `app.yaml` sets `LAKEBASE_BRANCH_ID=production` |
+| `dev-{username}` | Local development | Auto-detected from email (e.g., `dev-alex-lopez`) |
+| Custom | Feature branches | `--branch` flag or `LAKEBASE_BRANCH_ID` env var |
 
-Each branch has its own endpoint, data, and migration state. Schema migrations must be applied to each branch independently. When you create a new migration, apply it to both:
+Each branch has its own endpoint, data, and migration state. Schema migrations must be applied to each branch independently. When you create a new migration, apply it to your dev branch and production:
 
 ```bash
-uv run alembic upgrade head                          # local-dev (from .env)
-LAKEBASE_BRANCH_ID=main uv run alembic upgrade head  # main
+uv run alembic upgrade head                                # dev-{username} (auto-detected)
+LAKEBASE_BRANCH_ID=production uv run alembic upgrade head  # production
 ```
 
 ## API Endpoints
@@ -233,7 +180,7 @@ The app is deployed as a [Databricks App](https://docs.databricks.com/dev-tools/
 ### 1. Run migrations against the main branch
 
 ```bash
-LAKEBASE_BRANCH_ID=main uv run alembic upgrade head
+LAKEBASE_BRANCH_ID=production uv run alembic upgrade head
 ```
 
 ### 2. Keep requirements.txt up to date
@@ -277,7 +224,7 @@ databricks apps get lakebase-todo-app-dev
 
 ### Configuration on Databricks
 
-Environment variables are set in `app.yaml` and injected at runtime — including `LAKEBASE_BRANCH_ID=main`, which points the deployed app at the `main` branch. The app authenticates to Lakebase using the Databricks Apps service principal OAuth flow — no secrets to manage.
+Environment variables are set in `app.yaml` and injected at runtime — including `LAKEBASE_BRANCH_ID=production`, which points the deployed app at the default `production` branch. The app authenticates to Lakebase using the Databricks Apps service principal OAuth flow — no secrets to manage.
 
 The DAB resource in `resources/todo_app.yml` requests the `sql` user API scope, which grants the app's service principal permission to generate database credentials.
 

@@ -32,7 +32,7 @@ def get_current_user(request: Request) -> CurrentUser:
 
     if not email:
         settings = get_settings()
-        email = settings.user.email or None
-        name = name or settings.user.name or None
+        email = settings.user.get_email() or None
+        name = name or settings.user.get_name() or None
 
     return CurrentUser(email=email, name=name)

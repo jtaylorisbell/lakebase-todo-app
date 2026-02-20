@@ -15,7 +15,7 @@ env:
   - name: LAKEBASE_PROJECT_ID
     value: "todo-app"
   - name: LAKEBASE_BRANCH_ID
-    value: "main"
+    value: "production"
   - name: LAKEBASE_ENDPOINT_ID
     value: "default"
   - name: LAKEBASE_DATABASE

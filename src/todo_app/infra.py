@@ -205,7 +205,7 @@ class LakebaseProvisioner:
         user_email: str,
         *,
         project_id: str = "todo-app",
-        branch_id: str = "main",
+        branch_id: str = "production",
         endpoint_id: str = "default",
     ) -> ProvisionResult:
         self.ensure_project(project_id)
@@ -228,7 +228,7 @@ class LakebaseProvisioner:
         self,
         *,
         project_id: str = "todo-app",
-        branch_id: str = "main",
+        branch_id: str = "production",
         endpoint_id: str = "default",
         app_name: str | None = None,
     ) -> None:

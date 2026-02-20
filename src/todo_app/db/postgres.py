@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import os
 from contextlib import contextmanager
 from typing import Generator
 
 import psycopg
 import structlog
+
+from todo_app.config import _token_manager, get_settings
 
 logger = structlog.get_logger()
 
@@ -16,77 +17,31 @@ class LakebaseConnectionFactory:
     """Factory for creating Lakebase connections with OAuth authentication."""
 
     def __init__(self):
-        project_id = os.getenv("LAKEBASE_PROJECT_ID")
+        settings = get_settings()
+        self._postgres_host = settings.lakebase.get_host()
+        self._postgres_database = settings.lakebase.database
+        self._postgres_username = settings.lakebase.get_user()
+        self._endpoint_name = settings.lakebase.endpoint_name
 
-        if project_id:
-            from databricks.sdk import WorkspaceClient
-            from databricks.sdk.core import Config
-
-            self._config = Config()
-            self._workspace_client = WorkspaceClient()
-
-            branch_id = os.getenv("LAKEBASE_BRANCH_ID", "main")
-            endpoint_id = os.getenv("LAKEBASE_ENDPOINT_ID", "default")
-            self._endpoint_name = (
-                f"projects/{project_id}/branches/{branch_id}/endpoints/{endpoint_id}"
-            )
-
-            endpoint = self._workspace_client.postgres.get_endpoint(name=self._endpoint_name)
-            self._postgres_host = endpoint.status.hosts.host
-            self._postgres_database = os.getenv("LAKEBASE_DATABASE", "postgres")
-            self._postgres_username = self._config.client_id
-            self._use_databricks_apps = True
-
-            logger.info(
-                "lakebase_factory_initialized",
-                host=self._postgres_host,
-                database=self._postgres_database,
-                auth="databricks_apps_oauth",
-            )
-        else:
-            from todo_app.config import get_settings
-
-            self._use_databricks_apps = False
-            settings = get_settings()
-            self._postgres_host = settings.lakebase.get_host()
-            self._postgres_database = settings.lakebase.database
-            self._postgres_username = settings.lakebase.get_user()
-            self._endpoint_name = settings.lakebase.endpoint_name
-
-            logger.info(
-                "lakebase_factory_initialized",
-                host=self._postgres_host,
-                database=self._postgres_database,
-                auth="local_oauth",
-            )
+        logger.info(
+            "lakebase_factory_initialized",
+            host=self._postgres_host,
+            database=self._postgres_database,
+            branch=settings.lakebase.get_branch_id(),
+            user=self._postgres_username,
+        )
 
     def get_connection(self) -> psycopg.Connection:
-        if self._use_databricks_apps:
-            cred = self._workspace_client.postgres.generate_database_credential(
-                endpoint=self._endpoint_name
-            )
+        token = _token_manager.get_token(endpoint_name=self._endpoint_name)
 
-            return psycopg.connect(
-                host=self._postgres_host,
-                port=5432,
-                dbname=self._postgres_database,
-                user=self._postgres_username,
-                password=cred.token,
-                sslmode="require",
-            )
-        else:
-            from todo_app.config import _token_manager
-
-            token = _token_manager.get_token(endpoint_name=self._endpoint_name)
-
-            return psycopg.connect(
-                host=self._postgres_host,
-                port=5432,
-                dbname=self._postgres_database,
-                user=self._postgres_username,
-                password=token,
-                sslmode="require",
-            )
+        return psycopg.connect(
+            host=self._postgres_host,
+            port=5432,
+            dbname=self._postgres_database,
+            user=self._postgres_username,
+            password=token,
+            sslmode="require",
+        )
 
 
 _factory: LakebaseConnectionFactory | None = None
