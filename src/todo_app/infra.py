@@ -236,27 +236,31 @@ class LakebaseProvisioner:
 
     def ensure_database(
         self,
-        project_id: str,
-        branch_id: str,
-        endpoint_id: str,
+        endpoint: Endpoint,
+        endpoint_name: str,
         database: str,
     ) -> None:
         """Create the application database if it doesn't exist."""
         import psycopg
 
-        from todo_app.config import LakebaseSettings
+        host = endpoint.status.hosts.host
+        user = self._w.config.client_id or self._w.current_user.me().user_name
+        cred = self._w.postgres.generate_database_credential(endpoint=endpoint_name)
 
-        lb = LakebaseSettings(branch_id=branch_id, endpoint_id=endpoint_id)
-        host = lb.get_host()
-        user = lb.get_user()
-        password = lb.get_password()
+        logger.info(
+            "connecting_to_create_database",
+            host=host,
+            user=user,
+            endpoint=endpoint_name,
+            database=database,
+        )
 
         conn = psycopg.connect(
             host=host,
             port=5432,
             dbname="postgres",
             user=user,
-            password=password,
+            password=cred.token,
             sslmode="require",
             autocommit=True,
         )
@@ -285,7 +289,7 @@ class LakebaseProvisioner:
         """
         self.ensure_project(project_id)
         self.ensure_branch(project_id, branch_id)
-        self.ensure_endpoint(project_id, branch_id, endpoint_id)
+        endpoint = self.ensure_endpoint(project_id, branch_id, endpoint_id)
         self.protect_branch(project_id, branch_id)
 
         # Create role for CI service principal (the identity running this code)
@@ -303,4 +307,5 @@ class LakebaseProvisioner:
                 )
 
         # Create application database (idempotent)
-        self.ensure_database(project_id, branch_id, endpoint_id, database)
+        endpoint_name = endpoint.name or f"projects/{project_id}/branches/{branch_id}/endpoints/{endpoint_id}"
+        self.ensure_database(endpoint, endpoint_name, database)
