@@ -234,19 +234,54 @@ class LakebaseProvisioner:
             database="postgres",
         )
 
+    def ensure_database(
+        self,
+        project_id: str,
+        branch_id: str,
+        endpoint_id: str,
+        database: str,
+    ) -> None:
+        """Create the application database if it doesn't exist."""
+        import psycopg
+
+        from todo_app.config import LakebaseSettings
+
+        lb = LakebaseSettings(branch_id=branch_id, endpoint_id=endpoint_id)
+        host = lb.get_host()
+        user = lb.get_user()
+        password = lb.get_password()
+
+        conn = psycopg.connect(
+            host=host,
+            port=5432,
+            dbname="postgres",
+            user=user,
+            password=password,
+            sslmode="require",
+            autocommit=True,
+        )
+        try:
+            conn.execute(f"CREATE DATABASE {database}")
+            logger.info("database_created", database=database)
+        except psycopg.errors.DuplicateDatabase:
+            logger.info("database_exists", database=database)
+        finally:
+            conn.close()
+
     def provision_ci(
         self,
         *,
         project_id: str = "todo-app",
         branch_id: str = "production",
-        endpoint_id: str = "default",
+        endpoint_id: str = "primary",
+        database: str = "todoapp",
         app_name: str | None = None,
     ) -> None:
         """Provision infrastructure for CI/CD.
 
         Ensures Lakebase resources exist, protects the branch, creates a role
-        for the CI service principal, and optionally creates a role for the
-        Databricks App service principal (looked up by app_name).
+        for the CI service principal, creates the application database, and
+        optionally creates a role for the Databricks App service principal.
         """
         self.ensure_project(project_id)
         self.ensure_branch(project_id, branch_id)
@@ -266,3 +301,6 @@ class LakebaseProvisioner:
                 self.ensure_role(
                     project_id, branch_id, app_sp_id, RoleIdentityType.SERVICE_PRINCIPAL
                 )
+
+        # Create application database (idempotent)
+        self.ensure_database(project_id, branch_id, endpoint_id, database)
