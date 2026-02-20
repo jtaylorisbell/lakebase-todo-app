@@ -169,9 +169,8 @@ class LakebaseProvisioner:
             # on the default production branch). Find it.
             logger.info("endpoint_exists_different_id", expected=name, error=str(e))
             for ep in self._w.postgres.list_endpoints(parent=parent):
-                if ep.spec and ep.spec.endpoint_type == EndpointType.ENDPOINT_TYPE_READ_WRITE:
-                    logger.info("endpoint_found", endpoint=ep.name)
-                    return ep
+                logger.info("endpoint_found", endpoint=ep.name)
+                return ep
             raise
 
     def ensure_role(
