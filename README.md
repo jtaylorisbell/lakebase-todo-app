@@ -21,8 +21,6 @@ lakebase-todo-app/
 │   ├── env.py              # Migration environment (OAuth-aware)
 │   ├── script.py.mako      # Migration file template
 │   └── versions/           # Migration scripts
-├── sql/
-│   └── postgres_tables.sql # Reference DDL (documentation only)
 ├── resources/
 │   └── todo_app.yml        # DAB app resource definition
 ├── src/todo_app/
@@ -266,8 +264,8 @@ databricks bundle deploy -t prod
 
 The `databricks.yml` defines two targets:
 
-- **dev** — development mode, deploys under your user directory
-- **prod** — production mode, runs as the deploying user
+- **dev** — development environment
+- **prod** — production environment
 
 ### 4. Verify the deployment
 
@@ -282,3 +280,33 @@ databricks apps get lakebase-todo-app-dev
 Environment variables are set in `app.yaml` and injected at runtime — including `LAKEBASE_BRANCH_ID=main`, which points the deployed app at the `main` branch. The app authenticates to Lakebase using the Databricks Apps service principal OAuth flow — no secrets to manage.
 
 The DAB resource in `resources/todo_app.yml` requests the `sql` user API scope, which grants the app's service principal permission to generate database credentials.
+
+## CI/CD
+
+GitHub Actions workflows handle continuous integration and deployment using trunk-based development:
+
+| Workflow | Trigger | What it does |
+|---|---|---|
+| `ci.yml` | PR to `main` | Ruff lint, pytest, TypeScript typecheck, bundle validate |
+| `deploy-dev.yml` | Push to `main` | Deploy bundle, provision Lakebase, run migrations, deploy app |
+| `release-prod.yml` | Manual dispatch (main only) | Run tests, deploy to prod, create GitHub Release |
+
+### Required GitHub configuration
+
+**Secrets** (repository-level):
+- `ARM_CLIENT_ID` — Azure Entra ID app registration client ID
+- `ARM_CLIENT_SECRET` — Azure Entra ID app registration client secret value
+- `ARM_TENANT_ID` — Azure AD tenant ID
+
+**Variables** (repository-level):
+- `DATABRICKS_HOST` — Databricks workspace URL (e.g., `https://adb-xxx.yy.azuredatabricks.net`)
+
+### Bootstrap: Lakebase project permissions (manual step)
+
+The CI service principal must be granted **Can Manage** on the Lakebase project before the deploy workflows can provision infrastructure or create Postgres roles. This permission cannot be set via API — it must be configured manually in the Databricks UI:
+
+1. Navigate to the Lakebase project in the workspace
+2. Open the project's **Permissions** settings
+3. Add the CI service principal and grant **Can Manage**
+
+This is a one-time setup step. Once granted, the `provision_ci()` method in `infra.py` handles everything else automatically: creating the Lakebase project/branch/endpoint, protecting the branch, and creating Postgres roles for both the CI service principal and the Databricks App service principal.
