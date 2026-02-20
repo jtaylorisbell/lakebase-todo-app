@@ -82,14 +82,15 @@ This will:
 - Detect your identity from the Databricks SDK
 - Create a personal Lakebase branch named `dev-{username}` (e.g., `dev-alex-lopez`)
 - Provision the endpoint and Postgres role
-- Create the `todoapp` database
-- Run Alembic migrations
+- Run Alembic migrations (creates the `todoapp` database if it doesn't exist)
 
-Options:
+Override defaults with flags:
 
 ```bash
 uv run python scripts/dev_setup.py --branch my-feature   # custom branch name
-uv run python scripts/dev_setup.py --skip-migrations      # skip alembic
+uv run python scripts/dev_setup.py --project my-project   # custom project ID
+uv run python scripts/dev_setup.py --endpoint primary      # custom endpoint ID
+uv run python scripts/dev_setup.py --skip-migrations       # skip alembic
 ```
 
 ### 4. Start the development servers
@@ -104,23 +105,21 @@ cd frontend && npm run dev
 
 Open http://localhost:5173 in your browser.
 
-> **Note:** `.env` is optional. If present, its values override auto-detected config. See `.env.example` for available settings.
+> **Note:** The backend auto-detects `dev-{username}` from your Databricks identity — no configuration needed for the default branch. If you provisioned a custom branch with `--branch`, set `LAKEBASE_BRANCH_ID` when starting the backend (the setup script will show the exact command).
 
 ## Branching Strategy
 
-Each developer gets an isolated [Lakebase branch](https://docs.databricks.com/en/lakebase/) derived from their Databricks identity:
+Lakebase [branches](https://docs.databricks.com/en/lakebase/) provide isolated Postgres environments with independent data, endpoints, and migration state.
 
-| Branch | Used by | How it's resolved |
-|---|---|---|
-| `production` | Deployed app + CI | Default Lakebase branch; `app.yaml` sets `LAKEBASE_BRANCH_ID=production` |
-| `dev-{username}` | Local development | Auto-detected from email (e.g., `dev-alex-lopez`) |
-| Custom | Feature branches | `--branch` flag or `LAKEBASE_BRANCH_ID` env var |
+**`production`** is the single long-lived branch. The deployed app always connects to `production` (hardcoded in `app.yaml`), and CI runs migrations against it. This branch should never be deleted.
 
-Each branch has its own endpoint, data, and migration state. Schema migrations must be applied to each branch independently. When you create a new migration, apply it to your dev branch and production:
+**Development branches** are short-lived and disposable. The setup script creates one per developer (defaulting to `dev-{username}`, configurable via `--branch`). Use them to iterate on schema changes and test locally without affecting production data. Delete them when you're done.
+
+Schema changes flow through git (Alembic migrations), not through Lakebase branch merges. When you create a new migration, apply it to your dev branch locally, then CI applies it to `production` on merge:
 
 ```bash
-uv run alembic upgrade head                                # dev-{username} (auto-detected)
-LAKEBASE_BRANCH_ID=production uv run alembic upgrade head  # production
+uv run alembic upgrade head                                # your dev branch (auto-detected)
+LAKEBASE_BRANCH_ID=production uv run alembic upgrade head  # production (CI handles this)
 ```
 
 ## API Endpoints
@@ -140,6 +139,16 @@ LAKEBASE_BRANCH_ID=production uv run alembic upgrade head  # production
 ## Database Migrations
 
 Schema changes are managed with [Alembic](https://alembic.sqlalchemy.org/). The SQLAlchemy models in `src/todo_app/db/schemas.py` are the source of truth. The app checks for pending migrations on startup and logs a warning if the database is behind.
+
+Alembic auto-detects your `dev-{username}` branch by default. If you provisioned a custom branch with `--branch`, prefix commands with `LAKEBASE_BRANCH_ID`:
+
+```bash
+# Default branch (auto-detected) — no prefix needed
+uv run alembic upgrade head
+
+# Custom branch — specify explicitly
+LAKEBASE_BRANCH_ID=my-feature uv run alembic upgrade head
+```
 
 ### Create a new migration
 
@@ -173,64 +182,9 @@ uv run alembic history           # Show migration history
 uv run alembic heads             # Show latest revision
 ```
 
-## Deploying to Databricks
-
-The app is deployed as a [Databricks App](https://docs.databricks.com/dev-tools/databricks-apps/) using [Databricks Asset Bundles](https://docs.databricks.com/dev-tools/bundles/). The deployed app uses the `main` Lakebase branch.
-
-### 1. Run migrations against the main branch
-
-```bash
-LAKEBASE_BRANCH_ID=production uv run alembic upgrade head
-```
-
-### 2. Keep requirements.txt up to date
-
-Databricks Apps installs Python dependencies from `requirements.txt` (not `pyproject.toml`). After adding or updating dependencies with `uv`, regenerate it:
-
-```bash
-uv export --no-hashes --no-emit-project > requirements.txt
-```
-
-### 3. Deploy with DAB
-
-Databricks Apps automatically runs `npm install`, `npm run build`, and `pip install -r requirements.txt` during deployment — no manual build step needed.
-
-```bash
-# Validate the bundle
-databricks bundle validate -t dev
-
-# Deploy to the dev target
-databricks bundle deploy -t dev
-
-# Run the app (deploys source code and starts it)
-databricks bundle run -t dev todo_app
-
-# Deploy to production
-databricks bundle deploy -t prod
-```
-
-The `databricks.yml` defines two targets:
-
-- **dev** — development environment
-- **prod** — production environment
-
-### 4. Verify the deployment
-
-Once deployed, the app is accessible at the URL shown in the Databricks Apps UI. You can also check:
-
-```bash
-databricks apps get lakebase-todo-app-dev
-```
-
-### Configuration on Databricks
-
-Environment variables are set in `app.yaml` and injected at runtime — including `LAKEBASE_BRANCH_ID=production`, which points the deployed app at the default `production` branch. The app authenticates to Lakebase using the Databricks Apps service principal OAuth flow — no secrets to manage.
-
-The DAB resource in `resources/todo_app.yml` requests the `sql` user API scope, which grants the app's service principal permission to generate database credentials.
-
 ## CI/CD
 
-GitHub Actions workflows handle continuous integration and deployment using trunk-based development:
+GitHub Actions workflows handle continuous integration and deployment using **trunk-based development**:
 
 | Workflow | Trigger | What it does |
 |---|---|---|

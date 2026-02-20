@@ -237,83 +237,23 @@ class LakebaseProvisioner:
             database="postgres",
         )
 
-    def ensure_database(
-        self,
-        endpoint: Endpoint,
-        endpoint_name: str,
-        database: str,
-    ) -> None:
-        """Create the application database if it doesn't exist."""
-        import time
-
-        import psycopg
-
-        host = endpoint.status.hosts.host
-        me = self._w.current_user.me()
-        user = me.user_name
-        cred = self._w.postgres.generate_database_credential(endpoint=endpoint_name)
-
-        logger.info(
-            "connecting_to_create_database",
-            host=host,
-            user=user,
-            config_client_id=self._w.config.client_id,
-            me_user_name=me.user_name,
-            me_display_name=me.display_name,
-            endpoint=endpoint_name,
-            database=database,
-            token_length=len(cred.token) if cred.token else 0,
-        )
-
-        last_error = None
-        for attempt in range(3):
-            if attempt > 0:
-                logger.info("retrying_database_connection", attempt=attempt + 1, wait=5)
-                time.sleep(5)
-                cred = self._w.postgres.generate_database_credential(endpoint=endpoint_name)
-
-            try:
-                conn = psycopg.connect(
-                    host=host,
-                    port=5432,
-                    dbname="postgres",
-                    user=user,
-                    password=cred.token,
-                    sslmode="require",
-                    autocommit=True,
-                )
-                try:
-                    conn.execute(f"CREATE DATABASE {database}")
-                    logger.info("database_created", database=database)
-                except psycopg.errors.DuplicateDatabase:
-                    logger.info("database_exists", database=database)
-                finally:
-                    conn.close()
-                return
-            except psycopg.OperationalError as e:
-                last_error = e
-                logger.warning("database_connection_failed", attempt=attempt + 1, error=str(e))
-
-        raise last_error
-
     def provision_ci(
         self,
         *,
         project_id: str = "todo-app",
         branch_id: str = "production",
         endpoint_id: str = "primary",
-        database: str = "todoapp",
         app_name: str | None = None,
     ) -> None:
         """Provision infrastructure for CI/CD.
 
-        Ensures Lakebase resources exist, protects the branch, creates a role
-        for the CI service principal, creates the application database, and
-        optionally creates a role for the Databricks App service principal.
+        Ensures Lakebase resources exist, protects the branch, and creates
+        Postgres roles for the CI and App service principals. Database
+        creation is handled by Alembic migrations.
         """
         self.ensure_project(project_id)
         self.ensure_branch(project_id, branch_id)
-        endpoint = self.ensure_endpoint(project_id, branch_id, endpoint_id)
+        self.ensure_endpoint(project_id, branch_id, endpoint_id)
         self.protect_branch(project_id, branch_id)
 
         # Create role for CI service principal (the identity running this code)
@@ -334,9 +274,6 @@ class LakebaseProvisioner:
             app_sp_id = app.service_principal_client_id
             if app_sp_id:
                 self.ensure_role(
-                    project_id, branch_id, app_sp_id, RoleIdentityType.SERVICE_PRINCIPAL
+                    project_id, branch_id, app_sp_id,
+                    RoleIdentityType.SERVICE_PRINCIPAL,
                 )
-
-        # Create application database (idempotent)
-        endpoint_name = endpoint.name or f"projects/{project_id}/branches/{branch_id}/endpoints/{endpoint_id}"
-        self.ensure_database(endpoint, endpoint_name, database)
