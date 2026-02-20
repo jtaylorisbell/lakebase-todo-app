@@ -99,8 +99,11 @@ class LakebaseProvisioner:
         except AlreadyExists:
             return self._w.postgres.get_branch(name=name)
 
-    def protect_branch(self, project_id: str, branch_id: str) -> Branch:
-        """Protect a branch from deletion and reset. Idempotent."""
+    def protect_branch(self, project_id: str, branch_id: str) -> Branch | None:
+        """Protect a branch from deletion and reset. Idempotent.
+
+        Returns None if the branch cannot be protected (e.g., plan limit reached).
+        """
         name = f"projects/{project_id}/branches/{branch_id}"
         branch = self._w.postgres.get_branch(name=name)
         if branch.spec and branch.spec.is_protected:
@@ -108,14 +111,18 @@ class LakebaseProvisioner:
             return branch
 
         logger.info("protecting_branch", branch=name)
-        op = self._w.postgres.update_branch(
-            name=name,
-            branch=Branch(name=name, spec=BranchSpec(is_protected=True)),
-            update_mask=_SnakeCaseFieldMask(["spec.is_protected"]),
-        )
-        branch = op.wait()
-        logger.info("branch_protected", branch=name)
-        return branch
+        try:
+            op = self._w.postgres.update_branch(
+                name=name,
+                branch=Branch(name=name, spec=BranchSpec(is_protected=True)),
+                update_mask=_SnakeCaseFieldMask(["spec.is_protected"]),
+            )
+            branch = op.wait()
+            logger.info("branch_protected", branch=name)
+            return branch
+        except BadRequest as e:
+            logger.warning("branch_protection_failed", branch=name, error=str(e))
+            return None
 
     def ensure_endpoint(
         self,
