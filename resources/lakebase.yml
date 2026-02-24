@@ -1,13 +1,13 @@
 resources:
   postgres_projects:
-    todo_app:
+    todo_app_project:
       project_id: ${var.lakebase_project_id}
       display_name: "Lakebase Todo App"
       pg_version: 17
 
   postgres_branches:
     production:
-      parent: ${resources.postgres_projects.todo_app.id}
+      parent: ${resources.postgres_projects.todo_app_project.id}
       branch_id: production
       is_protected: true
       no_expiry: true
