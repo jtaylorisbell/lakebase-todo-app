@@ -21,12 +21,16 @@ lakebase-todo-app/
 │   ├── env.py              # Migration environment (OAuth-aware)
 │   ├── script.py.mako      # Migration file template
 │   └── versions/           # Migration scripts
+├── scripts/
+│   ├── dev_setup.py        # Local dev setup (personal branch, endpoint, role)
+│   └── manage_roles.py     # CI/CD Postgres role management (SQL-based)
 ├── resources/
+│   ├── lakebase.yml        # DAB Lakebase resources (project, branch, endpoint)
 │   └── todo_app.yml        # DAB app resource definition
 ├── src/todo_app/
 │   ├── __init__.py
 │   ├── config.py           # Settings + OAuth token management
-│   ├── infra.py            # Lakebase provisioner (project/branch/endpoint)
+│   ├── infra.py            # Dev branch provisioning (personal Lakebase branches)
 │   ├── api/
 │   │   ├── main.py         # FastAPI app + routes
 │   │   ├── schemas.py      # Pydantic request/response models
@@ -51,7 +55,7 @@ lakebase-todo-app/
 
 - [uv](https://docs.astral.sh/uv/) (Python package manager)
 - [Node.js](https://nodejs.org/) >= 18
-- [Databricks CLI](https://docs.databricks.com/dev-tools/cli/index.html)
+- [Databricks CLI](https://docs.databricks.com/dev-tools/cli/index.html) >= 0.287.0 (required for Lakebase DABs support)
 - **Can Manage** permission on the Lakebase project in your workspace
 
 ## Local Development
@@ -189,7 +193,7 @@ GitHub Actions workflows handle continuous integration and deployment using **tr
 | Workflow | Trigger | What it does |
 |---|---|---|
 | `ci.yml` | PR to `main` | Ruff lint, pytest, TypeScript typecheck, bundle validate |
-| `deploy-dev.yml` | Push to `main` | Deploy bundle, provision Lakebase, run migrations, deploy app |
+| `deploy-dev.yml` | Push to `main` | Deploy bundle (incl. Lakebase infra), run migrations, create Postgres roles, deploy app |
 | `release-prod.yml` | Manual dispatch (main only) | Run tests, deploy to prod, create GitHub Release |
 
 ### Required GitHub configuration
@@ -202,12 +206,10 @@ GitHub Actions workflows handle continuous integration and deployment using **tr
 **Variables** (repository-level):
 - `DATABRICKS_HOST` — Databricks workspace URL (e.g., `https://adb-xxx.yy.azuredatabricks.net`)
 
-### Bootstrap: Lakebase project permissions (manual step)
+### Bootstrap
 
-The CI service principal must be granted **Can Manage** on the Lakebase project before the deploy workflows can provision infrastructure or create Postgres roles. This permission cannot be set via API — it must be configured manually in the Databricks UI:
+The Lakebase project, production branch (with protection), and endpoint are managed declaratively via DABs (`resources/lakebase.yml`). On first `bundle deploy`, the CI service principal creates the project and automatically becomes the project owner with **Can Manage** permissions and a `databricks_superuser` Postgres role.
 
-1. Navigate to the Lakebase project in the workspace
-2. Open the project's **Permissions** settings
-3. Add the CI service principal and grant **Can Manage**
+After migrations run (which install the `databricks_auth` extension), `scripts/manage_roles.py` uses SQL (`SELECT databricks_create_role(...)`) to create the App service principal's Postgres role and grant it database permissions.
 
-This is a one-time setup step. Once granted, the `provision_ci()` method in `infra.py` handles everything else automatically: creating the Lakebase project/branch/endpoint, protecting the branch, and creating Postgres roles for both the CI service principal and the Databricks App service principal.
+> **Note:** If the Lakebase project was created outside of DABs (e.g., manually via the UI), the CI service principal won't be the project owner. In that case, grant it **Can Manage** manually: navigate to the project in the Lakebase App, open **Settings** > **Project permissions**, and add the CI service principal.

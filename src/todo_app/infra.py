@@ -1,8 +1,14 @@
-"""Lakebase Autoscaling infrastructure provisioner."""
+"""Lakebase developer branch provisioner.
+
+Production infrastructure (project, branch, endpoint, branch protection) is
+managed declaratively via Databricks Asset Bundles (resources/lakebase.yml).
+Postgres roles for CI/CD are managed via SQL (scripts/manage_roles.py).
+
+This module handles developer-specific branch provisioning for local
+development, where branch names are dynamic (dev-{username}).
+"""
 
 from __future__ import annotations
-
-from dataclasses import dataclass
 
 import structlog
 from databricks.sdk import WorkspaceClient
@@ -25,32 +31,11 @@ from google.protobuf.duration_pb2 import Duration
 logger = structlog.get_logger()
 
 
-class _SnakeCaseFieldMask:
-    """FieldMask that preserves snake_case paths.
-
-    The protobuf FieldMask.ToJsonString() auto-converts to camelCase, but
-    the Lakebase API expects snake_case field paths. This duck-typed wrapper
-    implements ToJsonString() without the camelCase conversion.
-    """
-
-    def __init__(self, paths: list[str]):
-        self._paths = paths
-
-    def ToJsonString(self) -> str:  # noqa: N802
-        return ",".join(self._paths)
-
-
-@dataclass
-class ProvisionResult:
-    project_name: str
-    branch_name: str
-    endpoint_name: str
-    host: str
-    database: str
-
-
 class LakebaseProvisioner:
-    """Idempotent provisioner for Lakebase Autoscaling resources."""
+    """Idempotent provisioner for developer Lakebase branches.
+
+    Used by dev_setup.py to create personal branches, endpoints, and roles.
+    """
 
     def __init__(self, w: WorkspaceClient | None = None):
         self._w = w or WorkspaceClient()
@@ -98,31 +83,6 @@ class LakebaseProvisioner:
             return branch
         except AlreadyExists:
             return self._w.postgres.get_branch(name=name)
-
-    def protect_branch(self, project_id: str, branch_id: str) -> Branch | None:
-        """Protect a branch from deletion and reset. Idempotent.
-
-        Returns None if the branch cannot be protected (e.g., plan limit reached).
-        """
-        name = f"projects/{project_id}/branches/{branch_id}"
-        branch = self._w.postgres.get_branch(name=name)
-        if branch.spec and branch.spec.is_protected:
-            logger.info("branch_already_protected", branch=name)
-            return branch
-
-        logger.info("protecting_branch", branch=name)
-        try:
-            op = self._w.postgres.update_branch(
-                name=name,
-                branch=Branch(name=name, spec=BranchSpec(is_protected=True)),
-                update_mask=_SnakeCaseFieldMask(["spec.is_protected"]),
-            )
-            branch = op.wait()
-            logger.info("branch_protected", branch=name)
-            return branch
-        except BadRequest as e:
-            logger.warning("branch_protection_failed", branch=name, error=str(e))
-            return None
 
     def ensure_endpoint(
         self,
@@ -212,63 +172,3 @@ class LakebaseProvisioner:
         except (AlreadyExists, BadRequest) as e:
             logger.info("role_already_exists", role=name, error=str(e))
             return None
-
-    def provision_all(
-        self,
-        user_email: str,
-        *,
-        project_id: str = "todo-app",
-        branch_id: str = "production",
-        endpoint_id: str = "default",
-    ) -> ProvisionResult:
-        self.ensure_project(project_id)
-        self.ensure_branch(project_id, branch_id)
-        endpoint = self.ensure_endpoint(project_id, branch_id, endpoint_id)
-        self.ensure_role(project_id, branch_id, user_email, RoleIdentityType.USER)
-
-        host = endpoint.status.hosts.host if endpoint.status and endpoint.status.hosts else ""
-
-        return ProvisionResult(
-            project_name=f"projects/{project_id}",
-            branch_name=f"projects/{project_id}/branches/{branch_id}",
-            endpoint_name=endpoint.name,
-            host=host,
-            database="postgres",
-        )
-
-    def provision_ci(
-        self,
-        *,
-        project_id: str = "todo-app",
-        branch_id: str = "production",
-        endpoint_id: str = "primary",
-        app_name: str | None = None,
-    ) -> None:
-        """Provision infrastructure for CI/CD.
-
-        Ensures Lakebase resources exist, protects the branch, and creates
-        Postgres roles for the CI and App service principals. Database
-        creation is handled by Alembic migrations.
-        """
-        self.ensure_project(project_id)
-        self.ensure_branch(project_id, branch_id)
-        self.ensure_endpoint(project_id, branch_id, endpoint_id)
-        self.protect_branch(project_id, branch_id)
-
-        # Create role for CI service principal (the identity running this code)
-        is_service_principal = self._w.config.client_id or self._w.config.azure_client_id
-        if is_service_principal:
-            me = self._w.current_user.me()
-            self.ensure_role(
-                project_id, branch_id, me.user_name,
-                RoleIdentityType.SERVICE_PRINCIPAL,
-            )
-
-        # Create role for the Databricks App service principal
-        if app_name:
-            app_sp_id = self._w.apps.get(name=app_name).service_principal_client_id
-            if app_sp_id:
-                self.ensure_role(
-                    project_id, branch_id, app_sp_id,
-                    RoleIdentityType.SERVICE_PRINCIPAL,
-                )

@@ -1,0 +1,21 @@
+resources:
+  postgres_projects:
+    todo_app:
+      project_id: ${var.lakebase_project_id}
+      display_name: "Lakebase Todo App"
+      pg_version: 17
+
+  postgres_branches:
+    production:
+      parent: ${resources.postgres_projects.todo_app.id}
+      branch_id: production
+      is_protected: true
+      no_expiry: true
+
+  postgres_endpoints:
+    primary:
+      parent: ${resources.postgres_branches.production.id}
+      endpoint_id: primary
+      endpoint_type: ENDPOINT_TYPE_READ_WRITE
+      autoscaling_limit_min_cu: 0.5
+      autoscaling_limit_max_cu: 2

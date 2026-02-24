@@ -35,17 +35,8 @@ sync:
 # Variables with defaults (can be overridden per target)
 variables:
   lakebase_project_id:
-    description: Lakebase project ID
+    description: Lakebase project ID (used by postgres_projects resource)
     default: todo-app
-  lakebase_branch_id:
-    description: Lakebase branch ID
-    default: main
-  lakebase_endpoint_id:
-    description: Lakebase endpoint ID
-    default: default
-  lakebase_database:
-    description: Lakebase database name
-    default: todoapp
 
 # Target environments
 targets:
