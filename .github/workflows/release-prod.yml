@@ -46,7 +46,7 @@ jobs:
         with:
           python-version: "3.12"
       - uses: databricks/setup-cli@main
-      - run: uv sync
+      - run: uv sync --extra migrations
 
       - run: databricks bundle validate -t prod
 
