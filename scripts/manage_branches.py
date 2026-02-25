@@ -30,7 +30,7 @@ from databricks.sdk.service.postgres import (
 from helpers import get_workspace_client
 
 
-PROJECT_ID = os.getenv("LAKEBASE_PROJECT_ID", "my-app")
+PROJECT_ID = os.getenv("LAKEBASE_PROJECT_ID", "todo-app")
 
 
 def list_branches(w, project_id: str) -> None:
