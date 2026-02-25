@@ -6,7 +6,10 @@ from datetime import datetime, timedelta
 from functools import lru_cache
 
 import structlog
+from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+load_dotenv()
 
 logger = structlog.get_logger()
 
@@ -122,14 +125,21 @@ class LakebaseSettings(BaseSettings):
             raise
 
     def get_data_api_url(self) -> str:
-        """Get the Data API URL, constructing from workspace host + endpoint if not set."""
+        """Get the Data API URL, constructing from endpoint host + workspace ID.
+
+        Format: https://{endpoint_host}/api/2.0/workspace/{workspace_id}/rest/{database}
+        """
         if self.data_api_url:
             return self.data_api_url.rstrip("/")
 
+        import re
+
         w = _get_workspace_client()
-        host = w.config.host.rstrip("/")
-        endpoint_name = self.get_endpoint_name()
-        return f"{host}/api/2.0/lakebase/{endpoint_name}/data"
+        endpoint_host = self.get_host()
+        # Extract workspace ID from host URL (e.g. adb-1234567890.15.azuredatabricks.net → 1234567890)
+        m = re.search(r"adb-(\d+)", w.config.host)
+        workspace_id = m.group(1) if m else ""
+        return f"https://{endpoint_host}/api/2.0/workspace/{workspace_id}/rest/{self.database}"
 
     def get_host(self) -> str:
         """Resolve the Postgres host dynamically from the Lakebase endpoint."""

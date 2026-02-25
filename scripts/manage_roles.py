@@ -59,6 +59,10 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
     GRANT USAGE  ON SEQUENCES TO {role};
 """
 
+# Data API: allow the authenticator role to assume each user's identity.
+# Only works after the Data API has been enabled in the Lakebase UI.
+SQL_GRANT_TO_AUTHENTICATOR = "GRANT {role} TO authenticator"
+
 
 def _quote_role(email: str) -> str:
     """Postgres-quote a role name (email addresses need double-quoting)."""
@@ -87,12 +91,20 @@ def ensure_sp_role(cur, identity: str) -> None:
 
 def grant_permissions(cur, email: str, readonly: bool = False) -> None:
     """Grant Postgres permissions to a role."""
+    import psycopg2
+
     role = _quote_role(email)
     template = SQL_GRANT_READONLY if readonly else SQL_GRANT_READWRITE
-    sql = template.format(role=role)
-    cur.execute(sql)
+    cur.execute(template.format(role=role))
     mode = "read-only" if readonly else "read-write"
     print(f"  + Granted {mode} on public schema to {email}")
+
+    # Grant to Data API authenticator role (if Data API is enabled)
+    try:
+        cur.execute(SQL_GRANT_TO_AUTHENTICATOR.format(role=role))
+        print(f"  + Granted Data API access to {email}")
+    except psycopg2.errors.UndefinedObject:
+        print(f"  ! Data API not enabled — skipping authenticator grant")
 
 
 def provision_app_roles(app_name: str) -> None:
