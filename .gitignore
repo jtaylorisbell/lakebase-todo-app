@@ -53,6 +53,10 @@ htmlcov/
 # uv
 uv.lock
 
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate*
+
 # Databricks
 .databricks/
 
