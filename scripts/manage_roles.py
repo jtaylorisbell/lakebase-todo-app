@@ -99,12 +99,15 @@ def grant_permissions(cur, email: str, readonly: bool = False) -> None:
     mode = "read-only" if readonly else "read-write"
     print(f"  + Granted {mode} on public schema to {email}")
 
-    # Grant to Data API authenticator role (if Data API is enabled)
+    # Grant to Data API authenticator role (requires superuser / project owner)
     try:
         cur.execute(SQL_GRANT_TO_AUTHENTICATOR.format(role=role))
         print(f"  + Granted Data API access to {email}")
-    except psycopg2.errors.UndefinedObject:
-        print(f"  ! Data API not enabled — skipping authenticator grant")
+    except (psycopg2.errors.UndefinedObject, psycopg2.errors.InsufficientPrivilege) as e:
+        if "authenticator" in str(e) and "UndefinedObject" in type(e).__name__:
+            print(f"  ! Data API not enabled — skipping authenticator grant")
+        else:
+            print(f"  ! Authenticator grant requires superuser — run via CI")
 
 
 def provision_app_roles(app_name: str) -> None:
