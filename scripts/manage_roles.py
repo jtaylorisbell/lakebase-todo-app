@@ -9,16 +9,14 @@ Everything runs in the default ``databricks_postgres`` database where the
 databricks_auth extension and application tables live.
 
 Usage:
-    uv run python manage_roles.py --analysts analyst1@co.com analyst2@co.com
     uv run python manage_roles.py --engineers eng1@co.com eng2@co.com
     uv run python manage_roles.py --readonly reader@co.com
-    uv run python manage_roles.py --from-env          # reads TEAM_* from .env
-    uv run python manage_roles.py --app my-app-dev    # CI + App SP roles
+    uv run python manage_roles.py --app my-app-dev    # App SP role
+    uv run python manage_roles.py --app my-app-dev --db-access scripts/db_access.json
 """
 
 import argparse
 import json
-import os
 import sys
 
 from helpers import get_pg_connection, get_workspace_client
@@ -110,69 +108,6 @@ def grant_permissions(cur, email: str, readonly: bool = False) -> None:
             print(f"  ! Authenticator grant requires superuser — run via CI")
 
 
-def provision_app_roles(app_name: str) -> None:
-    """Create Postgres roles for CI and App service principals.
-
-    Detects the CI SP identity from the current SDK session and looks up
-    the App SP client_id via the Databricks Apps API. Both get
-    SERVICE_PRINCIPAL roles with read-write permissions.
-    """
-    w = get_workspace_client()
-
-    identities: list[str] = []
-
-    # CI service principal — the identity running this script
-    me = w.current_user.me()
-    print(f"\nCI service principal: {me.user_name}")
-    identities.append(me.user_name)
-
-    # App service principal — looked up via the Apps API
-    app = w.apps.get(name=app_name)
-    app_sp_id = app.service_principal_client_id
-    if app_sp_id:
-        print(f"App service principal ({app_name}): {app_sp_id}")
-        identities.append(app_sp_id)
-    else:
-        print(f"Warning: App '{app_name}' has no service_principal_client_id")
-
-    conn = get_pg_connection()
-    conn.autocommit = True
-
-    try:
-        with conn.cursor() as cur:
-            cur.execute("CREATE EXTENSION IF NOT EXISTS databricks_auth")
-            for identity in identities:
-                print(f"\nProvisioning SP: {identity}")
-                ensure_sp_role(cur, identity)
-                grant_permissions(cur, identity)
-    finally:
-        conn.close()
-
-    print("\nDone.")
-
-
-def provision_users(emails: list[str], readonly: bool = False) -> None:
-    """Create roles and grant permissions for a list of users."""
-    if not emails:
-        return
-
-    conn = get_pg_connection()
-    conn.autocommit = True
-
-    try:
-        with conn.cursor() as cur:
-            # Ensure the databricks_auth extension is available
-            cur.execute("CREATE EXTENSION IF NOT EXISTS databricks_auth")
-            for email in emails:
-                print(f"\nProvisioning: {email}")
-                ensure_role(cur, email)
-                grant_permissions(cur, email, readonly=readonly)
-    finally:
-        conn.close()
-
-    print("\nDone.")
-
-
 def main():
     parser = argparse.ArgumentParser(
         description="Manage Lakebase Postgres roles and permissions."
@@ -184,50 +119,80 @@ def main():
         help="Emails for read-write access.",
     )
     parser.add_argument(
-        "--analysts",
-        nargs="*",
-        default=[],
-        help="Emails for read-write access (same as --engineers).",
-    )
-    parser.add_argument(
         "--readonly",
         nargs="*",
         default=[],
         help="Emails for read-only access.",
     )
     parser.add_argument(
-        "--from-env",
-        action="store_true",
-        help="Read TEAM_ENGINEERS and TEAM_ANALYSTS from .env as JSON arrays.",
+        "--db-access",
+        metavar="PATH",
+        help="Path to JSON file with 'readwrite' and 'readonly' email lists.",
     )
     parser.add_argument(
         "--app",
         metavar="APP_NAME",
-        help="Create SERVICE_PRINCIPAL roles for the CI SP and the Databricks App SP.",
+        help="Create a SERVICE_PRINCIPAL role for the Databricks App SP.",
     )
     args = parser.parse_args()
 
-    # --app mode: create SP roles for CI + App service principals
-    if args.app:
-        provision_app_roles(args.app)
-        return
-
-    engineers = list(args.engineers)
-    analysts = list(args.analysts)
+    # ── Collect emails from all sources ──────────
+    readwrite = list(args.engineers)
     readonly = list(args.readonly)
 
-    if args.from_env:
-        engineers += json.loads(os.getenv("TEAM_ENGINEERS", "[]"))
-        analysts += json.loads(os.getenv("TEAM_ANALYSTS", "[]"))
+    if args.db_access:
+        with open(args.db_access) as f:
+            data = json.load(f)
+        readwrite += data.get("readwrite", [])
+        readonly += data.get("readonly", [])
 
-    readwrite = list(set(engineers + analysts))
+    readwrite = list(set(readwrite))
+    readonly = list(set(readonly))
 
-    if not readwrite and not readonly:
+    # ── Resolve App SP identity (if --app) ───────
+    app_sp_id = None
+    if args.app:
+        w = get_workspace_client()
+        app = w.apps.get(name=args.app)
+        app_sp_id = app.service_principal_client_id
+        if app_sp_id:
+            print(f"App service principal ({args.app}): {app_sp_id}")
+        else:
+            print(f"Warning: App '{args.app}' has no service_principal_client_id")
+
+    if not app_sp_id and not readwrite and not readonly:
         parser.print_help()
         sys.exit(1)
 
-    provision_users(readwrite, readonly=False)
-    provision_users(readonly, readonly=True)
+    # ── Single connection for all operations ─────
+    conn = get_pg_connection()
+    conn.autocommit = True
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute("CREATE EXTENSION IF NOT EXISTS databricks_auth")
+
+            # App SP role
+            if app_sp_id:
+                print(f"\nProvisioning App SP: {app_sp_id}")
+                ensure_sp_role(cur, app_sp_id)
+                grant_permissions(cur, app_sp_id)
+
+            # Read-write user roles
+            for email in readwrite:
+                print(f"\nProvisioning (read-write): {email}")
+                ensure_role(cur, email)
+                grant_permissions(cur, email)
+
+            # Read-only user roles
+            for email in readonly:
+                print(f"\nProvisioning (read-only): {email}")
+                ensure_role(cur, email)
+                grant_permissions(cur, email, readonly=True)
+    finally:
+        conn.close()
+
+    print("\nDone.")
 
 
 if __name__ == "__main__":

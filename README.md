@@ -173,10 +173,9 @@ All workflows authenticate via a **Databricks-managed service principal** (`DATA
 Triggers on every push to `main`:
 
 1. `databricks bundle deploy -t dev` — creates/updates the App + Lakebase project + ACLs
-2. `manage_roles.py --app` — creates Postgres roles for CI + App service principals
-3. Provision user roles from `scripts/db_access.json` (readwrite + readonly)
-4. `alembic upgrade head` — runs migrations on production branch
-5. `databricks bundle run -t dev` — deploys app source code
+2. `manage_roles.py --app ... --db-access ...` — provisions App SP + user Postgres roles in one step
+3. `alembic upgrade head` — runs migrations on production branch
+4. `databricks bundle run -t dev` — deploys app source code
 
 ### 🏷️ Release to Prod (`release-prod.yml`)
 
@@ -222,8 +221,8 @@ uv run python scripts/manage_roles.py --engineers dev1@co.com dev2@co.com
 # Read-only roles
 uv run python scripts/manage_roles.py --readonly analyst@co.com
 
-# CI/CD: create SERVICE_PRINCIPAL roles for the CI SP and App SP
-uv run python scripts/manage_roles.py --app lakebase-todo-app-dev
+# CI/CD: App SP role + all users from db_access.json in one step
+uv run python scripts/manage_roles.py --app lakebase-todo-app-dev --db-access scripts/db_access.json
 ```
 
 Each role gets: CONNECT, USAGE, CRUD on all tables/sequences, ALTER DEFAULT PRIVILEGES for future objects, and a GRANT to the Data API `authenticator` role (if enabled).
