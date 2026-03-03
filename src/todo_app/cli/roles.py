@@ -1,26 +1,14 @@
-#!/usr/bin/env python3
-"""Create Postgres roles and grant database permissions.
+"""Create Postgres roles and grant database permissions."""
 
-This script handles the *database-level* permission layer:
-  - Creates OAuth roles for team members via databricks_create_role()
-  - Grants appropriate Postgres privileges (CONNECT, USAGE, SELECT, etc.)
-
-Everything runs in the default ``databricks_postgres`` database where the
-databricks_auth extension and application tables live.
-
-Usage:
-    uv run python manage_roles.py --engineers eng1@co.com eng2@co.com
-    uv run python manage_roles.py --readonly reader@co.com
-    uv run python manage_roles.py --app my-app-dev    # App SP role
-    uv run python manage_roles.py --app my-app-dev --db-access scripts/db_access.json
-"""
-
-import argparse
 import json
-import sys
+from pathlib import Path
+from typing import Annotated
 
-from helpers import get_pg_connection, get_workspace_client
+import typer
 
+from todo_app.helpers import get_pg_connection, get_workspace_client
+
+app = typer.Typer(help="Manage Lakebase Postgres roles.")
 
 # ── SQL templates ────────────────────────────────
 
@@ -57,8 +45,6 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
     GRANT USAGE  ON SEQUENCES TO {role};
 """
 
-# Data API: allow the authenticator role to assume each user's identity.
-# Only works after the Data API has been enabled in the Lakebase UI.
 SQL_GRANT_TO_AUTHENTICATOR = "GRANT {role} TO authenticator"
 
 
@@ -97,72 +83,60 @@ def grant_permissions(cur, email: str, readonly: bool = False) -> None:
     mode = "read-only" if readonly else "read-write"
     print(f"  + Granted {mode} on public schema to {email}")
 
-    # Grant to Data API authenticator role (requires superuser / project owner)
     try:
         cur.execute(SQL_GRANT_TO_AUTHENTICATOR.format(role=role))
         print(f"  + Granted Data API access to {email}")
     except (psycopg2.errors.UndefinedObject, psycopg2.errors.InsufficientPrivilege) as e:
         if "authenticator" in str(e) and "UndefinedObject" in type(e).__name__:
-            print(f"  ! Data API not enabled — skipping authenticator grant")
+            print("  ! Data API not enabled — skipping authenticator grant")
         else:
-            print(f"  ! Authenticator grant requires superuser — run via CI")
+            print("  ! Authenticator grant requires superuser — run via CI")
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Manage Lakebase Postgres roles and permissions."
-    )
-    parser.add_argument(
-        "--engineers",
-        nargs="*",
-        default=[],
-        help="Emails for read-write access.",
-    )
-    parser.add_argument(
-        "--readonly",
-        nargs="*",
-        default=[],
-        help="Emails for read-only access.",
-    )
-    parser.add_argument(
-        "--db-access",
-        metavar="PATH",
-        help="Path to JSON file with 'readwrite' and 'readonly' email lists.",
-    )
-    parser.add_argument(
-        "--app",
-        metavar="APP_NAME",
-        help="Create a SERVICE_PRINCIPAL role for the Databricks App SP.",
-    )
-    args = parser.parse_args()
-
+@app.command()
+def provision(
+    app_name: Annotated[
+        str | None, typer.Option("--app", help="Databricks App name (creates SP role).")
+    ] = None,
+    db_access: Annotated[
+        Path | None,
+        typer.Option(help="Path to JSON file with 'readwrite' and 'readonly' email lists."),
+    ] = None,
+    engineers: Annotated[
+        list[str] | None, typer.Option(help="Emails for read-write access.")
+    ] = None,
+    readonly: Annotated[
+        list[str] | None, typer.Option(help="Emails for read-only access.")
+    ] = None,
+) -> None:
+    """Provision Postgres roles and grant database permissions."""
     # ── Collect emails from all sources ──────────
-    readwrite = list(args.engineers)
-    readonly = list(args.readonly)
+    readwrite = list(engineers or [])
+    readonly_list = list(readonly or [])
 
-    if args.db_access:
-        with open(args.db_access) as f:
+    if db_access:
+        with open(db_access) as f:
             data = json.load(f)
         readwrite += data.get("readwrite", [])
-        readonly += data.get("readonly", [])
+        readonly_list += data.get("readonly", [])
 
     readwrite = list(set(readwrite))
-    readonly = list(set(readonly))
+    readonly_list = list(set(readonly_list))
 
     # ── Resolve App SP identity (if --app) ───────
     app_sp_id = None
-    if args.app:
+    if app_name:
         w = get_workspace_client()
-        app = w.apps.get(name=args.app)
-        app_sp_id = app.service_principal_client_id
+        app_obj = w.apps.get(name=app_name)
+        app_sp_id = app_obj.service_principal_client_id
         if app_sp_id:
-            print(f"App service principal ({args.app}): {app_sp_id}")
+            print(f"App service principal ({app_name}): {app_sp_id}")
         else:
-            print(f"Warning: App '{args.app}' has no service_principal_client_id")
+            print(f"Warning: App '{app_name}' has no service_principal_client_id")
 
-    if not app_sp_id and not readwrite and not readonly:
-        parser.print_help()
-        sys.exit(1)
+    if not app_sp_id and not readwrite and not readonly_list:
+        print("No roles to provision. Pass --app, --db-access, --engineers, or --readonly.")
+        raise typer.Exit(code=1)
 
     # ── Single connection for all operations ─────
     conn = get_pg_connection()
@@ -172,20 +146,17 @@ def main():
         with conn.cursor() as cur:
             cur.execute("CREATE EXTENSION IF NOT EXISTS databricks_auth")
 
-            # App SP role
             if app_sp_id:
                 print(f"\nProvisioning App SP: {app_sp_id}")
                 ensure_sp_role(cur, app_sp_id)
                 grant_permissions(cur, app_sp_id)
 
-            # Read-write user roles
             for email in readwrite:
                 print(f"\nProvisioning (read-write): {email}")
                 ensure_role(cur, email)
                 grant_permissions(cur, email)
 
-            # Read-only user roles
-            for email in readonly:
+            for email in readonly_list:
                 print(f"\nProvisioning (read-only): {email}")
                 ensure_role(cur, email)
                 grant_permissions(cur, email, readonly=True)
@@ -193,7 +164,3 @@ def main():
         conn.close()
 
     print("\nDone.")
-
-
-if __name__ == "__main__":
-    main()

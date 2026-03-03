@@ -6,7 +6,6 @@ Falls back to PGHOST/PGUSER/PGPASSWORD environment variables when set.
 
 import os
 
-import psycopg2
 from dotenv import load_dotenv
 from databricks.sdk import WorkspaceClient
 
@@ -128,6 +127,8 @@ def get_pg_connection(
     endpoint_id : str
         Endpoint ID (default: primary).
     """
+    import psycopg2
+
     _project = project_id or os.getenv("LAKEBASE_PROJECT_ID", "todo-app")
     _branch = branch_id or os.getenv("LAKEBASE_BRANCH_ID", "production")
 

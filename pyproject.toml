@@ -18,7 +18,11 @@ dependencies = [
     "structlog>=25.5.0",
     "sqlalchemy>=2.0.45",
     "alembic>=1.14.0",
+    "typer>=0.15.0",
 ]
+
+[project.scripts]
+lbctl = "todo_app.cli:app"
 
 [project.optional-dependencies]
 migrations = [

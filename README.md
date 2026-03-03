@@ -45,10 +45,10 @@ lakebase-todo-app/
 │   ├── env.py                       # OAuth-aware, auto-resolves credentials
 │   └── versions/
 │
-├── scripts/                         # 🛠️ Operational scripts
-│   ├── helpers.py                   # Shared connection / auth utilities
-│   ├── manage_roles.py              # Postgres roles & Data API grants
-│   ├── manage_branches.py           # Create / delete / reset branches
+├── src/todo_app/cli/                # 🛠️ lbctl CLI (Typer)
+│   ├── __init__.py                  # Root app — registers subcommands
+│   └── roles.py                     # Postgres roles & Data API grants
+├── scripts/
 │   └── db_access.json               # Database-layer user lists (readwrite/readonly)
 │
 └── .github/workflows/               # ⚡ CI/CD pipelines
@@ -95,10 +95,25 @@ DATABRICKS_CONFIG_PROFILE=todo-app-dev
 ### 3. Create your dev branch
 
 ```bash
-uv run python scripts/manage_branches.py create dev-<your-name>
+databricks postgres create-branch projects/todo-app dev-<your-name> \
+  --json '{"spec": {"source_branch": "projects/todo-app/branches/production", "no_expiry": true}}'
+databricks postgres create-endpoint projects/todo-app/branches/dev-<your-name> primary \
+  --json '{"spec": {"endpoint_type": "ENDPOINT_TYPE_READ_WRITE", "autoscaling_limit_min_cu": 0.5, "autoscaling_limit_max_cu": 2.0}}'
 ```
 
+Or use the Makefile shortcut: `make branch-create NAME=dev-<your-name>`
+
 This forks from `production` and creates a read-write endpoint with 0.5–2 CU.
+
+> **Keep your dev branch fresh.** Just like merging `main` into a feature branch in Git, you should periodically reset your dev branch to pull the latest schema and data from production. The Databricks CLI doesn't have a dedicated reset command yet, so use the API directly:
+>
+> ```bash
+> databricks api post /api/2.0/postgres/projects/todo-app/branches/dev-<your-name>:reset --json '{}'
+> ```
+>
+> Or: `make branch-reset NAME=dev-<your-name>`
+>
+> After resetting, re-run migrations: `LAKEBASE_BRANCH_ID=dev-<your-name> uv run alembic upgrade head`
 
 ### 4. Run migrations
 
@@ -158,7 +173,7 @@ To give a new developer access:
 | Layer | Controls | Managed by |
 |---|---|---|
 | **Project ACLs** | Platform ops (create branches, manage endpoints) | `resources/lakebase.yml` |
-| **Postgres roles** | Data access (SELECT, INSERT, etc.) + Data API | `scripts/manage_roles.py` + `scripts/db_access.json` |
+| **Postgres roles** | Data access (SELECT, INSERT, etc.) + Data API | `lbctl roles provision` + `scripts/db_access.json` |
 
 These are independent — CAN_MANAGE does not grant database access, and vice versa. Both are provisioned automatically by the deploy pipeline.
 
@@ -173,7 +188,7 @@ All workflows authenticate via a **Databricks-managed service principal** (`DATA
 Triggers on every push to `main`:
 
 1. `databricks bundle deploy -t dev` — creates/updates the App + Lakebase project + ACLs
-2. `manage_roles.py --app ... --db-access ...` — provisions App SP + user Postgres roles in one step
+2. `lbctl roles provision --app ... --db-access ...` — provisions App SP + user Postgres roles in one step
 3. `alembic upgrade head` — runs migrations on production branch
 4. `databricks bundle run -t dev` — deploys app source code
 
@@ -210,32 +225,38 @@ uv run alembic downgrade -1
 
 ---
 
-## 🛠️ Scripts
+## 🛠️ CLI
 
-### `manage_roles.py` — Postgres roles and permissions
+### `lbctl` — Lakebase role management
+
+`lbctl` is installed automatically via `uv sync` and manages the database-layer permissions that no existing tool covers — OAuth role creation via `databricks_create_role()`, Postgres grants, and Data API authenticator setup.
 
 ```bash
 # Developer roles (read-write)
-uv run python scripts/manage_roles.py --engineers dev1@co.com dev2@co.com
+uv run lbctl roles provision --engineers dev1@co.com --engineers dev2@co.com
 
 # Read-only roles
-uv run python scripts/manage_roles.py --readonly analyst@co.com
+uv run lbctl roles provision --readonly analyst@co.com
 
 # CI/CD: App SP role + all users from db_access.json in one step
-uv run python scripts/manage_roles.py --app lakebase-todo-app-dev --db-access scripts/db_access.json
+uv run lbctl roles provision --app lakebase-todo-app-dev --db-access scripts/db_access.json
 ```
 
 Each role gets: CONNECT, USAGE, CRUD on all tables/sequences, ALTER DEFAULT PRIVILEGES for future objects, and a GRANT to the Data API `authenticator` role (if enabled).
 
-### `manage_branches.py` — Lakebase branch lifecycle
+### `databricks postgres` — Branch lifecycle
+
+Branch operations use the [Databricks CLI](https://docs.databricks.com/aws/en/dev-tools/cli/reference/postgres-commands) directly:
 
 ```bash
-uv run python scripts/manage_branches.py list
-uv run python scripts/manage_branches.py create dev-alex
-uv run python scripts/manage_branches.py create dev-alex --min-cu 0.5 --max-cu 4
-uv run python scripts/manage_branches.py reset dev-alex
-uv run python scripts/manage_branches.py delete dev-alex
+databricks postgres list-branches projects/todo-app
+databricks postgres create-branch projects/todo-app dev-alex \
+  --json '{"spec": {"source_branch": "projects/todo-app/branches/production", "no_expiry": true}}'
+databricks postgres delete-branch projects/todo-app/branches/dev-alex
+databricks api post /api/2.0/postgres/projects/todo-app/branches/dev-alex:reset --json '{}'
 ```
+
+See the Makefile for shortcuts: `make branch-list`, `make branch-create NAME=dev-alex`, etc.
 
 ---
 
@@ -269,7 +290,7 @@ The backend uses the [Lakebase Data API](https://learn.microsoft.com/en-us/azure
 
 - Must be **enabled per-endpoint** via the Lakebase UI
 - Creates an `authenticator` Postgres role that assumes user identities
-- Each user needs `GRANT "user@email" TO authenticator` (handled by `manage_roles.py`)
+- Each user needs `GRANT "user@email" TO authenticator` (handled by `lbctl roles provision`)
 - The project owner **cannot** use the Data API (authenticator can't assume superuser roles)
 
 ### 🌿 Branching
