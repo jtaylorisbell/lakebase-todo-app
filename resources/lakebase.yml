@@ -4,3 +4,4 @@ resources:
       project_id: todo-app
       display_name: Lakebase Todo App
       pg_version: 17
+      permissions: []
