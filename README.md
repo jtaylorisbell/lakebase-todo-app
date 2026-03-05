@@ -243,6 +243,38 @@ See the Makefile for shortcuts: `make branch-list`, `make branch-create NAME=dev
 
 ---
 
+## 🤖 Claude Code Skills
+
+This repo includes project-local [Claude Code skills](https://docs.anthropic.com/en/docs/claude-code/skills) in `.claude/skills/` that let you run common dev workflows conversationally. If you have [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) installed, these skills are available automatically when you open the repo.
+
+### Available skills
+
+| Skill | What to say | What it does |
+|---|---|---|
+| **onboard-developer** | "Add jane.doe@databricks.com to the project" | Edits `databricks.yml` + `db/roles.yml` with correct formatting, validates no duplicates |
+| **branch-manage** | "Create a dev branch for me" | Runs `make branch-create`, migrations, reminds about Data API |
+| **db-migrate** | "Run migrations on my dev branch" | Targets the right branch with `LAKEBASE_BRANCH_ID`, runs Alembic |
+| **roles-manage** | "Show role drift" or "Sync roles" | Runs `lbctl roles diff/sync`, edits `db/roles.yml` |
+| **dev-server** | "Start the dev servers" | Launches backend (8000) + frontend (5173) in background |
+
+### Examples
+
+```
+> Onboard alex.smith@databricks.com with readwrite access
+  → Edits both config files, summarizes changes, reminds to push
+
+> Create a dev branch for alex-smith
+  → Runs make branch-create, runs migrations, reminds to enable Data API
+
+> What's the migration status on dev-taylor-isbell?
+  → Runs alembic current with the right LAKEBASE_BRANCH_ID
+
+> Start the app locally
+  → Launches both servers in background, shows status
+```
+
+---
+
 ## 🏛️ Architecture
 
 ```
