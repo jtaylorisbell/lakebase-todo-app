@@ -30,3 +30,14 @@ sync:
 targets:
   dev:
     default: true
+    resources:
+      apps:
+        todo_app:
+          permissions:
+            - service_principal_name: 4acb06a1-4088-41e2-ac3a-1547c840816f
+              level: CAN_MANAGE
+      postgres_projects:
+        todo_app_project:
+          permissions:
+            - user_name: taylor.isbell@databricks.com
+              level: CAN_MANAGE
