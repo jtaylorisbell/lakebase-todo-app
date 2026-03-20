@@ -1,437 +1,403 @@
-import { useState } from 'react';
-import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState, useEffect } from 'react'
 import {
-  Plus,
-  CheckCircle2,
-  Circle,
-  ListTodo,
-  Trash2,
-  ChevronDown,
-  User,
-  Database,
-  Sparkles,
-  BarChart3,
-  Flag,
-  Calendar,
-} from 'lucide-react';
-import { format, formatDistanceToNow, isPast, isToday } from 'date-fns';
-import { api } from './api/client';
-import type { CreateTodoRequest, Priority, Todo } from './types/api';
+  QueryClient,
+  QueryClientProvider,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
+import { Check, Plus, Trash2, Calendar, Sun, Moon } from 'lucide-react'
+import { formatDistanceToNow, isPast, isToday, parseISO } from 'date-fns'
+import { api } from './api/client'
+import type { CreateTodoRequest, Priority, Todo } from './types/api'
+import './index.css'
+
+type FilterMode = 'all' | 'active' | 'completed'
 
 const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 2000,
-      retry: 1,
-    },
-  },
-});
+  defaultOptions: { queries: { staleTime: 2000, retry: 1 } },
+})
 
-type FilterMode = 'all' | 'active' | 'completed';
+// ── Sidebar ──────────────────────────────────────────────────────────────────
 
-function capitalize(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
+function Sidebar() {
+  const { data: me } = useQuery({ queryKey: ['me'], queryFn: () => api.getMe() })
+  const { data: stats } = useQuery({
+    queryKey: ['stats'],
+    queryFn: () => api.getStats(),
+    refetchInterval: 30000,
+  })
 
-const PRIORITY_DOT_CLASSES: Record<Priority, string> = {
-  high: 'priority-dot-high',
-  medium: 'priority-dot-medium',
-  low: 'priority-dot-low',
-};
-
-const PRIORITY_BADGE_CLASSES: Record<Priority, string> = {
-  high: 'bg-[var(--accent-danger-dim)] text-[var(--accent-danger)]',
-  medium: 'bg-[var(--accent-warning-dim)] text-[var(--accent-warning)]',
-  low: 'bg-[var(--bg-elevated)] text-[var(--text-muted)]',
-};
-
-const PRIORITY_ACTIVE_CLASSES: Record<Priority, string> = {
-  high: 'bg-[var(--accent-danger)] text-white',
-  medium: 'bg-[var(--accent-warning)] text-white',
-  low: 'bg-[var(--text-muted)] text-white',
-};
-
-function useInvalidateTodos() {
-  const qc = useQueryClient();
-  return () => {
-    qc.invalidateQueries({ queryKey: ['todos'] });
-    qc.invalidateQueries({ queryKey: ['stats'] });
-  };
-}
-
-function TodoItem({ todo }: { todo: Todo }) {
-  const invalidate = useInvalidateTodos();
-
-  const toggleMutation = useMutation({
-    mutationFn: () => api.toggleTodo(todo.id),
-    onSuccess: invalidate,
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: () => api.deleteTodo(todo.id),
-    onSuccess: invalidate,
-  });
-
-  const completedStyle = todo.completed ? 'line-through text-[var(--text-muted)]' : '';
+  const total       = stats?.total        ?? 0
+  const completed   = stats?.completed    ?? 0
+  const pending     = stats?.pending      ?? 0
+  const highPri     = stats?.high_priority ?? 0
+  const pct         = total > 0 ? Math.round((completed / total) * 100) : 0
+  const displayName = me?.display_name || me?.name || me?.email?.split('@')[0] || '—'
+  const initials    = displayName.slice(0, 2).toUpperCase()
+  const email       = me?.email ?? ''
 
   return (
-    <div className={`card group px-5 py-4 flex items-start gap-4 animate-fade-in-up ${
-      todo.completed ? 'opacity-60' : ''
-    }`}>
-      <button
-        onClick={() => toggleMutation.mutate()}
-        className="mt-0.5 flex-shrink-0"
-        disabled={toggleMutation.isPending}
-      >
-        {todo.completed ? (
-          <CheckCircle2 className="h-6 w-6 text-[var(--accent-success)] animate-check" />
-        ) : (
-          <Circle className="h-6 w-6 text-[var(--border-hover)] hover:text-[var(--accent-primary)]" />
-        )}
-      </button>
-
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className={`priority-dot ${PRIORITY_DOT_CLASSES[todo.priority]}`} />
-          <h3 className={`text-base font-medium ${completedStyle || 'text-[var(--text-primary)]'}`}>
-            {todo.title}
-          </h3>
+    <aside className="sidebar">
+      <div className="sidebar-brand">
+        <div className="brand-mark">
+          <div className="brand-icon">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path d="M7 1L13 4V10L7 13L1 10V4L7 1Z" fill="#0B2026" />
+              <path d="M7 4L10 5.5V8.5L7 10L4 8.5V5.5L7 4Z" fill="#FF3621" />
+            </svg>
+          </div>
+          <span className="brand-name">Lakebase</span>
         </div>
-        {todo.description && (
-          <p className={`mt-1 text-sm ${completedStyle || 'text-[var(--text-secondary)]'}`}>
-            {todo.description}
-          </p>
-        )}
-        <div className="mt-2 flex items-center gap-3 text-xs text-[var(--text-muted)]">
-          <span>{formatDistanceToNow(new Date(todo.created_at), { addSuffix: true })}</span>
-          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${PRIORITY_BADGE_CLASSES[todo.priority]}`}>
-            {capitalize(todo.priority)}
+        <span className="brand-sub">Todo App</span>
+      </div>
+
+      <div className="user-chip">
+        <div className="user-avatar">{initials}</div>
+        <span className="user-name">{email}</span>
+      </div>
+
+      <div className="sidebar-stats">
+        <div className="stats-eyebrow">Overview</div>
+
+        <div className="stat-hero">
+          <div className="stat-hero-number">{total}</div>
+          <div className="stat-hero-label">total tasks</div>
+        </div>
+
+        <div className="stat-divider" />
+
+        <div className="stat-row">
+          <span className="stat-row-left">
+            <span className="stat-pip" style={{ background: 'var(--accent)' }} />
+            completed
           </span>
-          {todo.due_date && (
-            <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
-              todo.completed
-                ? 'bg-[var(--bg-elevated)] text-[var(--text-muted)]'
-                : isPast(new Date(todo.due_date + 'T00:00:00')) && !isToday(new Date(todo.due_date + 'T00:00:00'))
-                  ? 'bg-[var(--accent-danger-dim)] text-[var(--accent-danger)]'
-                  : isToday(new Date(todo.due_date + 'T00:00:00'))
-                    ? 'bg-[var(--accent-warning-dim)] text-[var(--accent-warning)]'
-                    : 'bg-[var(--bg-elevated)] text-[var(--text-muted)]'
-            }`}>
-              <Calendar className="h-3 w-3" />
-              {format(new Date(todo.due_date + 'T00:00:00'), 'MMM d')}
-            </span>
-          )}
+          <span className="stat-row-value">{completed}</span>
+        </div>
+        <div className="stat-row">
+          <span className="stat-row-left">
+            <span className="stat-pip" style={{ background: 'var(--warning)' }} />
+            pending
+          </span>
+          <span className="stat-row-value">{pending}</span>
+        </div>
+        <div className="stat-row">
+          <span className="stat-row-left">
+            <span className="stat-pip" style={{ background: 'var(--danger)' }} />
+            high priority
+          </span>
+          <span className="stat-row-value">{highPri}</span>
+        </div>
+
+        <div className="progress-wrap">
+          <div className="progress-head">
+            <span className="stats-eyebrow" style={{ marginBottom: 0 }}>Progress</span>
+            <span className="progress-pct">{pct}%</span>
+          </div>
+          <div className="progress-track">
+            <div className="progress-fill" style={{ width: `${pct}%` }} />
+          </div>
         </div>
       </div>
 
-      <button
-        onClick={() => deleteMutation.mutate()}
-        className="opacity-0 group-hover:opacity-100 p-2 rounded-lg hover:bg-[var(--accent-danger-dim)] text-[var(--text-muted)] hover:text-[var(--accent-danger)]"
-        disabled={deleteMutation.isPending}
-      >
-        <Trash2 className="h-4 w-4" />
-      </button>
-    </div>
-  );
+      <div className="sidebar-footer">
+        <img
+          src="https://cdn.bfldr.com/9AYANS2F/at/k8bgnnxhb4bggjk88r4x9snf/databricks-symbol-color.svg?auto=webp&format=png"
+          alt="Databricks"
+          className="footer-logo"
+        />
+        <span className="footer-text">Powered by Databricks Apps</span>
+      </div>
+    </aside>
+  )
 }
 
-function AddTodoForm() {
-  const invalidate = useInvalidateTodos();
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [priority, setPriority] = useState<Priority>('medium');
-  const [dueDate, setDueDate] = useState('');
-  const [showDetails, setShowDetails] = useState(false);
+// ── Add todo ──────────────────────────────────────────────────────────────────
+
+function AddSection() {
+  const qc = useQueryClient()
+  const [open, setOpen]               = useState(false)
+  const [title, setTitle]             = useState('')
+  const [description, setDescription] = useState('')
+  const [priority, setPriority]       = useState<Priority>('medium')
+  const [dueDate, setDueDate]         = useState('')
 
   const createMutation = useMutation({
-    mutationFn: (data: CreateTodoRequest) => api.createTodo(data),
+    mutationFn: (req: CreateTodoRequest) => api.createTodo(req),
     onSuccess: () => {
-      invalidate();
-      setTitle('');
-      setDescription('');
-      setPriority('medium');
-      setDueDate('');
-      setShowDetails(false);
+      qc.invalidateQueries({ queryKey: ['todos'] })
+      qc.invalidateQueries({ queryKey: ['stats'] })
+      setTitle(''); setDescription(''); setPriority('medium'); setDueDate(''); setOpen(false)
     },
-  });
+  })
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title.trim()) return;
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!title.trim()) return
     createMutation.mutate({
       title: title.trim(),
       description: description.trim() || undefined,
       priority,
       due_date: dueDate || undefined,
-    });
-  };
+    })
+  }
+
+  function handleCancel() {
+    setOpen(false); setTitle(''); setDescription(''); setPriority('medium'); setDueDate('')
+  }
 
   return (
-    <form onSubmit={handleSubmit} className="card p-5">
-      <div className="flex items-center gap-3">
-        <Plus className="h-5 w-5 text-[var(--accent-primary)] flex-shrink-0" />
-        <input
-          type="text"
-          placeholder="What needs to be done?"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          className="flex-1 border-none bg-transparent text-base font-medium placeholder:text-[var(--text-muted)] focus:ring-0 focus:shadow-none p-0"
-          style={{ boxShadow: 'none' }}
-        />
-        <button
-          type="button"
-          onClick={() => setShowDetails(!showDetails)}
-          className={`p-2 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] ${showDetails ? 'bg-[var(--bg-elevated)]' : ''}`}
-        >
-          <ChevronDown className={`h-4 w-4 transition-transform ${showDetails ? 'rotate-180' : ''}`} />
+    <div className="add-section">
+      {!open ? (
+        <button className="add-trigger" onClick={() => setOpen(true)}>
+          <span className="add-trigger-ring">
+            <Plus size={12} strokeWidth={2.5} />
+          </span>
+          New task…
         </button>
-        <button
-          type="submit"
-          disabled={!title.trim() || createMutation.isPending}
-          className="btn-primary px-4 py-2 text-sm disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none"
-        >
-          Add
-        </button>
-      </div>
-
-      {showDetails && (
-        <div className="mt-4 pl-8 space-y-3 animate-fade-in-up">
-          <textarea
-            placeholder="Add a description..."
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={2}
-            className="w-full resize-none text-sm"
-          />
-          <div className="flex items-center gap-2">
-            <Flag className="h-4 w-4 text-[var(--text-muted)]" />
-            <span className="text-sm text-[var(--text-secondary)]">Priority:</span>
-            {(['low', 'medium', 'high'] as Priority[]).map((p) => (
-              <button
-                key={p}
-                type="button"
-                onClick={() => setPriority(p)}
-                className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${
-                  priority === p
-                    ? PRIORITY_ACTIVE_CLASSES[p]
-                    : 'bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
-                }`}
-              >
-                {capitalize(p)}
-              </button>
-            ))}
-          </div>
-          <div className="flex items-center gap-2">
-            <Calendar className="h-4 w-4 text-[var(--text-muted)]" />
-            <span className="text-sm text-[var(--text-secondary)]">Due date:</span>
+      ) : (
+        <form onSubmit={handleSubmit} className="add-form">
+          <div className="form-title-row">
             <input
-              type="date"
-              value={dueDate}
-              onChange={(e) => setDueDate(e.target.value)}
-              className="px-3 py-1 rounded-lg text-xs font-medium bg-[var(--bg-elevated)] text-[var(--text-secondary)] border border-[var(--border-primary)]"
+              autoFocus
+              className="form-title-input"
+              placeholder="Task title"
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              onKeyDown={e => e.key === 'Escape' && handleCancel()}
             />
-            {dueDate && (
-              <button
-                type="button"
-                onClick={() => setDueDate('')}
-                className="text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-              >
-                Clear
-              </button>
-            )}
           </div>
-        </div>
+          <div className="form-body">
+            <textarea
+              className="form-desc"
+              placeholder="Add a description…"
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              rows={2}
+            />
+            <div className="form-controls">
+              {(['high', 'medium', 'low'] as Priority[]).map(p => (
+                <button
+                  key={p}
+                  type="button"
+                  className={`p-btn${priority === p ? ` sel-${p}` : ''}`}
+                  onClick={() => setPriority(p)}
+                >
+                  {p}
+                </button>
+              ))}
+              <input
+                type="date"
+                className="date-input"
+                value={dueDate}
+                onChange={e => setDueDate(e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="form-footer">
+            <button type="button" className="btn-ghost" onClick={handleCancel}>Cancel</button>
+            <button
+              type="submit"
+              className="btn-primary"
+              disabled={!title.trim() || createMutation.isPending}
+            >
+              {createMutation.isPending ? 'Adding…' : 'Add task'}
+            </button>
+          </div>
+        </form>
       )}
-    </form>
-  );
+    </div>
+  )
 }
 
-function StatsBar() {
-  const { data: stats } = useQuery({
-    queryKey: ['stats'],
-    queryFn: () => api.getStats(),
-    refetchInterval: 5000,
-  });
+// ── Todo item ─────────────────────────────────────────────────────────────────
 
-  if (!stats) return null;
+function TodoItem({ todo, index }: { todo: Todo; index: number }) {
+  const qc = useQueryClient()
 
-  const completionPct = stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0;
+  const toggleMutation = useMutation({
+    mutationFn: () => api.toggleTodo(todo.id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['todos'] })
+      qc.invalidateQueries({ queryKey: ['stats'] })
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: () => api.deleteTodo(todo.id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['todos'] })
+      qc.invalidateQueries({ queryKey: ['stats'] })
+    },
+  })
+
+  function dueClass() {
+    if (!todo.due_date || todo.completed) return ''
+    const d = parseISO(todo.due_date)
+    if (isToday(d)) return 'today'
+    if (isPast(d)) return 'overdue'
+    return ''
+  }
+
+  function dueLabel() {
+    if (!todo.due_date) return null
+    return parseISO(todo.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  }
+
+  const timeAgo = formatDistanceToNow(new Date(todo.created_at), { addSuffix: true })
+  const due = dueLabel()
 
   return (
-    <div className="grid grid-cols-4 gap-4">
-      <div className="stat-card p-4">
-        <div className="flex items-center gap-2 text-[var(--text-muted)] text-xs font-medium uppercase tracking-wider">
-          <ListTodo className="h-3.5 w-3.5" />
-          Total
+    <div
+      className={`todo-item p-${todo.priority}${todo.completed ? ' done' : ''}`}
+      style={{ animationDelay: `${index * 35}ms` }}
+    >
+      <button
+        className="todo-check"
+        onClick={() => toggleMutation.mutate()}
+        disabled={toggleMutation.isPending}
+        title={todo.completed ? 'Mark incomplete' : 'Mark complete'}
+      >
+        {todo.completed && <Check size={11} strokeWidth={3} />}
+      </button>
+
+      <div className="todo-body">
+        <div className="todo-title">{todo.title}</div>
+        <div className="todo-meta">
+          {todo.description && (
+            <>
+              <span className="todo-desc">{todo.description}</span>
+              <span className="meta-dot" />
+            </>
+          )}
+          <span className={`p-tag ${todo.priority}`}>{todo.priority}</span>
+          {due && (
+            <>
+              <span className="meta-dot" />
+              <span className={`due-tag ${dueClass()}`}>
+                <Calendar size={10} />
+                {due}
+              </span>
+            </>
+          )}
+          <span className="meta-dot" />
+          <span className="time-tag">{timeAgo}</span>
         </div>
-        <div className="mt-2 text-2xl font-bold text-[var(--text-primary)]">{stats.total}</div>
       </div>
 
-      <div className="stat-card stat-card-success p-4">
-        <div className="flex items-center gap-2 text-[var(--text-muted)] text-xs font-medium uppercase tracking-wider">
-          <CheckCircle2 className="h-3.5 w-3.5" />
-          Done
-        </div>
-        <div className="mt-2 text-2xl font-bold text-[var(--accent-success)]">{stats.completed}</div>
-        {stats.total > 0 && (
-          <div className="mt-2 w-full bg-[var(--bg-elevated)] rounded-full h-1.5">
-            <div
-              className="bg-[var(--accent-success)] h-1.5 rounded-full transition-all duration-500"
-              style={{ width: `${completionPct}%` }}
-            />
-          </div>
-        )}
-      </div>
-
-      <div className="stat-card stat-card-warning p-4">
-        <div className="flex items-center gap-2 text-[var(--text-muted)] text-xs font-medium uppercase tracking-wider">
-          <BarChart3 className="h-3.5 w-3.5" />
-          Pending
-        </div>
-        <div className="mt-2 text-2xl font-bold text-[var(--accent-warning)]">{stats.pending}</div>
-      </div>
-
-      <div className="stat-card stat-card-danger p-4">
-        <div className="flex items-center gap-2 text-[var(--text-muted)] text-xs font-medium uppercase tracking-wider">
-          <Flag className="h-3.5 w-3.5" />
-          High Priority
-        </div>
-        <div className="mt-2 text-2xl font-bold text-[var(--accent-danger)]">{stats.high_priority}</div>
+      <div className="todo-actions">
+        <button
+          className="btn-del"
+          onClick={() => deleteMutation.mutate()}
+          disabled={deleteMutation.isPending}
+          title="Delete"
+        >
+          <Trash2 size={13} />
+        </button>
       </div>
     </div>
-  );
+  )
 }
 
-function EmptyState({ filter }: { filter: FilterMode }) {
-  const messages = {
-    all: { title: 'No todos yet', sub: 'Add your first task to get started' },
-    active: { title: 'All caught up!', sub: 'No active tasks remaining' },
-    completed: { title: 'Nothing completed yet', sub: 'Complete a task to see it here' },
-  };
-  const msg = messages[filter];
+// ── Todo list ─────────────────────────────────────────────────────────────────
 
-  return (
-    <div className="empty-state text-center py-16">
-      <Sparkles className="h-12 w-12 mx-auto text-[var(--accent-primary)] mb-4" />
-      <h3 className="text-lg font-semibold text-[var(--text-primary)]">{msg.title}</h3>
-      <p className="text-sm text-[var(--text-muted)] mt-1">{msg.sub}</p>
-    </div>
-  );
-}
-
-function AppContent() {
-  const [filter, setFilter] = useState<FilterMode>('all');
-
-  const { data: currentUser, isLoading: userLoading } = useQuery({
-    queryKey: ['me'],
-    queryFn: () => api.getMe(),
-    staleTime: Infinity,
-  });
-
-  const completed = filter === 'all' ? undefined : filter === 'completed';
-  const { data: todosData, isLoading: todosLoading } = useQuery({
+function TodoList({ filter }: { filter: FilterMode }) {
+  const completed = filter === 'all' ? undefined : filter === 'completed'
+  const { data, isLoading } = useQuery({
     queryKey: ['todos', filter],
     queryFn: () => api.listTodos(completed),
-    refetchInterval: 5000,
-  });
+  })
 
-  const todos = todosData?.todos ?? [];
+  const todos = data?.todos ?? []
 
-  return (
-    <div className="min-h-screen bg-[var(--bg-primary)]">
-      <header className="bg-[var(--bg-secondary)] border-b border-[var(--border-primary)] sticky top-0 z-40">
-        <div className="max-w-3xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-[var(--accent-primary)] rounded-xl">
-                <ListTodo className="h-6 w-6 text-white" />
-              </div>
-              <div>
-                <h1 className="text-xl font-bold text-[var(--text-primary)] tracking-tight">
-                  Lakebase Todo
-                </h1>
-                <p className="text-xs text-[var(--text-muted)] flex items-center gap-1">
-                  <Database className="h-3 w-3" />
-                  Powered by Databricks Lakebase
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-elevated)] border border-[var(--border-primary)] rounded-lg">
-              <User className="h-4 w-4 text-[var(--accent-primary)]" />
-              {userLoading ? (
-                <div className="h-4 w-20 bg-[var(--bg-hover)] rounded animate-pulse" />
-              ) : (
-                <span className="text-sm font-medium text-[var(--text-secondary)]">
-                  {currentUser?.display_name || 'Guest'}
-                </span>
-              )}
+  if (isLoading) {
+    return (
+      <div className="todo-scroll">
+        {[60, 45, 75, 50].map((w, i) => (
+          <div key={i} className="skeleton-row">
+            <div className="skel" style={{ width: 20, height: 20, borderRadius: '50%' }} />
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div className="skel" style={{ height: 14, width: `${w}%` }} />
+              <div className="skel" style={{ height: 10, width: '28%' }} />
             </div>
           </div>
-        </div>
-      </header>
+        ))}
+      </div>
+    )
+  }
 
-      <main className="max-w-3xl mx-auto px-6 py-8 space-y-6">
-        <StatsBar />
-        <AddTodoForm />
-
-        <div className="flex items-center gap-1 p-1 bg-[var(--bg-elevated)] rounded-xl w-fit">
-          {(['all', 'active', 'completed'] as FilterMode[]).map((f) => (
-            <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                filter === f
-                  ? 'bg-[var(--bg-secondary)] text-[var(--text-primary)] shadow-sm'
-                  : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
-              }`}
-            >
-              {capitalize(f)}
-            </button>
-          ))}
+  if (todos.length === 0) {
+    return (
+      <div className="todo-scroll">
+        <div className="empty">
+          <span className="empty-glyph">∅</span>
+          <span className="empty-label">
+            {filter === 'completed' ? 'Nothing completed yet'
+              : filter === 'active' ? 'All caught up'
+              : 'No tasks yet'}
+          </span>
         </div>
+      </div>
+    )
+  }
 
-        <div className="space-y-2">
-          {todosLoading ? (
-            <div className="space-y-2">
-              {[1, 2, 3].map((i) => (
-                <div key={i} className="card p-5">
-                  <div className="flex items-center gap-4">
-                    <div className="h-6 w-6 bg-[var(--bg-elevated)] rounded-full animate-pulse" />
-                    <div className="flex-1 space-y-2">
-                      <div className="h-4 w-3/4 bg-[var(--bg-elevated)] rounded animate-pulse" />
-                      <div className="h-3 w-1/2 bg-[var(--bg-elevated)] rounded animate-pulse" />
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : todos.length === 0 ? (
-            <EmptyState filter={filter} />
-          ) : (
-            todos.map((todo) => <TodoItem key={todo.id} todo={todo} />)
-          )}
-        </div>
-      </main>
-
-      <footer className="mt-8 py-6 border-t border-[var(--border-primary)]">
-        <div className="max-w-3xl mx-auto px-6 flex items-center justify-center text-xs text-[var(--text-muted)] gap-1">
-          <span>Lakebase Todo v0.1.0</span>
-          <span className="mx-2">|</span>
-          <Database className="h-3 w-3" />
-          <span>Databricks Lakebase Autoscaling</span>
-        </div>
-      </footer>
+  return (
+    <div className="todo-scroll">
+      {todos.map((todo, i) => (
+        <TodoItem key={todo.id} todo={todo} index={i} />
+      ))}
     </div>
-  );
+  )
 }
 
-function App() {
+// ── App ───────────────────────────────────────────────────────────────────────
+
+function AppContent() {
+  const [filter, setFilter] = useState<FilterMode>('all')
+  const [dark, setDark] = useState(() => {
+    const saved = localStorage.getItem('theme')
+    return saved ? saved === 'dark' : true
+  })
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light')
+    localStorage.setItem('theme', dark ? 'dark' : 'light')
+  }, [dark])
+
+  return (
+    <div className="app-layout">
+      <Sidebar />
+      <div className="main-area">
+        <div className="main-header">
+          <span className="main-heading">Tasks</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div className="filter-tabs">
+              {(['all', 'active', 'completed'] as FilterMode[]).map(f => (
+                <button
+                  key={f}
+                  className={`filter-tab${filter === f ? ' active' : ''}`}
+                  onClick={() => setFilter(f)}
+                >
+                  {f}
+                </button>
+              ))}
+            </div>
+            <button className="theme-toggle" onClick={() => setDark(d => !d)} title="Toggle theme">
+              {dark ? <Sun size={14} /> : <Moon size={14} />}
+            </button>
+          </div>
+        </div>
+        <AddSection />
+        <TodoList filter={filter} />
+      </div>
+    </div>
+  )
+}
+
+export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AppContent />
     </QueryClientProvider>
-  );
+  )
 }
-
-export default App;
