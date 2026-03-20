@@ -36,7 +36,7 @@ def _build_url(lb: LakebaseSettings) -> str:
     return (
         f"postgresql+psycopg2://{quote_plus(user)}:{quote_plus(password)}"
         f"@{host}:5432/{lb.database}"
-        f"?sslmode=require"
+        f"?sslmode=require&connect_timeout=30"
     )
 
 
