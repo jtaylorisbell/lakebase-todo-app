@@ -24,7 +24,7 @@ jobs:
           version: 0.292.0      
       - run: uv sync --extra migrations
 
-      - name: Deploy bundle (creates app + service principal)
+      - name: Deploy bundle
         run: databricks bundle deploy -t dev
 
       - name: Sync database roles
